@@ -11,9 +11,10 @@ endif()
 
 project ("StreamToActionTranslator" CXX)
 
+
 # Add source to this project's executable.
 #add_executable (StreamToActionTranslator  "src/StreamToActionTranslator.h" "src/main.cpp")
-add_library (StreamToActionTranslator  "src/StreamToActionTranslator.h" )
+add_library (StreamToActionTranslator OBJECT "src/StreamToActionTranslator.h" )
 
 set(TARGET StreamToActionTranslator)
 set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
