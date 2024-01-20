@@ -13,7 +13,7 @@ project ("StreamToActionTranslator" LANGUAGES CXX)
 
 set(SOURCES          # All .h/.cpp files in src/
 	src/StreamToActionTranslator.h
-    src/flux.h)
+    )
 
 set(TESTFILES        # All .cpp files in tests/
     tests/rand_gen.h

@@ -25,8 +25,6 @@ For more information, please refer to https://unlicense.org
 #include <concepts>
 #include <source_location>
 
-#include "flux.h"
-
 namespace sds
 {
 	namespace chron = std::chrono;
@@ -491,7 +489,20 @@ namespace sds
 		};
 	}
 
+	
+#pragma region Algos_For_Translator
 	// Algorithm functions used by the translator.
+
+	[[nodiscard]] constexpr bool IsNotEnd(const std::ranges::range auto& theRange, const std::ranges::iterator_t<decltype(theRange)>& theIterator) noexcept
+	{
+		return theIterator != std::ranges::cend(theRange);
+	}
+
+	[[nodiscard]] constexpr bool IsEnd(const std::ranges::range auto& theRange, const std::ranges::iterator_t<decltype(theRange)>& theIterator) noexcept
+	{
+		return theIterator == std::ranges::cend(theRange);
+	}
+
 	/**
 	 * \brief For a single mapping, search the controller state update buffer and produce a TranslationResult appropriate to the current mapping state and controller state.
 	 * \param downKeys Wrapper class containing the results of a controller state update polling.
@@ -501,14 +512,13 @@ namespace sds
 	template<typename Val_t>
 	[[nodiscard]] auto GetButtonTranslationForInitialToDown(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
 	{
-		using flux::find;
-		using flux::is_last;
+		using std::ranges::find;
 
 		if (singleButton.LastAction.IsInitialState())
 		{
 			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the down translation.
-			if (!is_last(downKeys, findResult))
+			if (IsNotEnd(downKeys, findResult))
 				return GetInitialKeyDownTranslationResult(singleButton);
 		}
 		return {};
@@ -517,8 +527,7 @@ namespace sds
 	template<typename Val_t>
 	[[nodiscard]] auto GetButtonTranslationForDownToRepeat(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
 	{
-		using flux::find;
-		using flux::is_last;
+		using std::ranges::find;
 
 		const bool isDownAndUsesRepeat = 
 			singleButton.LastAction.IsDown() 
@@ -531,7 +540,7 @@ namespace sds
 		{
 			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the repeat translation.
-			if (!is_last(downKeys, findResult))
+			if (IsNotEnd(downKeys, findResult))
 				return GetRepeatTranslationResult(singleButton);
 		}
 		return {};
@@ -540,15 +549,14 @@ namespace sds
 	template<typename Val_t>
 	[[nodiscard]] auto GetButtonTranslationForRepeatToRepeat(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
 	{
-		using flux::find;
-		using flux::is_last;
+		using std::ranges::find;
 
 		const bool isRepeatAndUsesInfinite = singleButton.LastAction.IsRepeating() && singleButton.Button.RepeatingKeyBehavior == RepeatType::Infinite;
 		if (isRepeatAndUsesInfinite && singleButton.LastAction.LastSentTime.IsElapsed())
 		{
 			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the repeat translation.
-			if (!is_last(downKeys, findResult))
+			if (IsNotEnd(downKeys, findResult))
 				return GetRepeatTranslationResult(singleButton);
 		}
 		return {};
@@ -557,13 +565,13 @@ namespace sds
 	template<typename Val_t>
 	[[nodiscard]] auto GetButtonTranslationForDownOrRepeatToUp(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
 	{
-		using flux::find;
-		using flux::is_last;
+		using std::ranges::find;
+
 		if (singleButton.LastAction.IsDown() || singleButton.LastAction.IsRepeating())
 		{
 			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
 			// If VK is not found in the down list, create the up translation.
-			if (is_last(downKeys, findResult))
+			if (IsEnd(downKeys, findResult))
 				return GetKeyUpTranslationResult(singleButton);
 		}
 		return {};
@@ -587,11 +595,10 @@ namespace sds
 	*/
 	[[nodiscard]] auto GetMappingIndexForVk(const NotBoolIntegral_c auto vk, const std::span<const MappingContainer> mappingsRange) noexcept -> std::optional<Index_t>
 	{
-		using flux::find_if;
-		using flux::is_last;
+		using std::ranges::find_if;
 
 		const auto findResult = find_if(mappingsRange, [vk](const auto e) { return e.Button.ButtonVirtualKeycode == vk; });
-		const bool didFindResult = !is_last(mappingsRange, findResult);
+		const bool didFindResult = IsNotEnd(mappingsRange, findResult);
 
 		[[unlikely]]
 		if (!didFindResult)
@@ -599,7 +606,7 @@ namespace sds
 			return {};
 		}
 
-		return static_cast<Index_t>(findResult);
+		return static_cast<Index_t>(std::distance(mappingsRange.cbegin(), findResult));
 	}
 
 	[[nodiscard]] constexpr auto IsVkInStateUpdate(const NotBoolIntegral_c auto vkToFind, const std::span<const int32_t> downVirtualKeys) noexcept -> bool
@@ -665,6 +672,8 @@ namespace sds
 	{
 		return mapping.Button.ExclusivityGrouping.has_value();
 	}
+
+#pragma endregion Algos_For_Translator
 
 	/**
 	 * \brief Encapsulates the mapping buffer, processes controller state updates, returns translation packs.
@@ -942,14 +951,16 @@ namespace sds
 
 		[[nodiscard]] auto FilterDownTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate) -> SmallVector_t<VirtualCode_t>
 		{
+			using std::views::filter;
+			using std::views::transform;
+
 			const auto vkToMappingIndex = [&](const auto vk) -> std::optional<std::size_t>
 			{
-				using flux::find_if;
-				using flux::is_last;
+				using std::ranges::find_if;
 
 				const auto findResult = find_if(m_mappings, [vk](const auto& e) { return e.Button.ButtonVirtualKeycode == vk; });
-				const bool didFindResult = !is_last(m_mappings, findResult);
-				return didFindResult ? static_cast<std::size_t>(findResult) : std::optional<std::size_t>{};
+				const bool didFindResult = IsNotEnd(m_mappings, findResult);
+				return didFindResult ? static_cast<std::size_t>(std::distance(m_mappings.cbegin(),findResult)) : std::optional<std::size_t>{};
 			};
 			const auto optWithValueAndGroup = [&](const auto opt) -> bool
 			{
@@ -964,7 +975,7 @@ namespace sds
 			SmallVector_t<VirtualCode_t> vksToRemoveRange;
 			// This appeared (at this time) to be the best option: 
 			// input vk List -> xform to mapping index list -> filter results to only include non-empty optional and ex. group -> xform to remove the optional = index list of mappings in the state update that have an ex. group.
-			for (const auto& mappingIndex : stateUpdateCopy | std::views::transform(vkToMappingIndex) | std::views::filter(optWithValueAndGroup) | std::views::transform(removeOpt))
+			for (const auto& mappingIndex : stateUpdateCopy | transform(vkToMappingIndex) | filter(optWithValueAndGroup) | transform(removeOpt))
 			{
 				auto& currentMapping = GetMappingAt(mappingIndex);
 				auto& currentGroup = m_groupMap[*currentMapping.Button.ExclusivityGrouping];
@@ -988,6 +999,7 @@ namespace sds
 		// it will process only one key per ex. group per iteration. The others will be filtered out and handled on the next iteration.
 		void FilterUpTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate)
 		{
+			using std::views::filter;
 			// filters for all mappings of interest per the current 'down' VK buffer (the UP mappings in this case).
 			const auto exGroupPred = [](const auto& currentMapping)
 				{
@@ -998,7 +1010,7 @@ namespace sds
 					return !IsMappingInRange(currentMapping.Button.ButtonVirtualKeycode, stateUpdate);
 				};
 
-			for (const auto& currentMapping : flux::ref(m_mappings).filter(exGroupPred).filter(stateUpdateUpPred))
+			for (const auto& currentMapping : m_mappings | filter(exGroupPred) | filter(stateUpdateUpPred))
 			{
 				auto& currentGroup = m_groupMap[*currentMapping.Button.ExclusivityGrouping];
 				currentGroup.UpdateForNewMatchingGroupingUp(currentMapping.Button.ButtonVirtualKeycode);
@@ -1020,9 +1032,8 @@ namespace sds
 		 */
 		[[nodiscard]] auto FilterStateUpdateForUniqueExclusivityGroups(SmallVector_t<VirtualCode_t>&& stateUpdate) -> SmallVector_t<VirtualCode_t>
 		{
-			using flux::find_if;
-			using flux::find;
-			using flux::is_last;
+			using std::ranges::find_if;
+			using std::ranges::find;
 			using StateRange_t = std::remove_cvref_t<decltype(stateUpdate)>;
 
 			const auto exGroupPred = [this](const auto indOpt) -> bool
@@ -1057,7 +1068,7 @@ namespace sds
 							const auto groupingFindResult = find(groupingValueBuffer, grpVal);
 
 							// If already in located, being handled groupings, add to remove buffer.
-							if (!is_last(groupingValueBuffer, groupingFindResult)) // != cend(groupingValueBuffer))
+							if (!IsEnd(groupingValueBuffer, groupingFindResult)) // != cend(groupingValueBuffer))
 								virtualKeycodesToRemove.push_back(vk);
 							// Otherwise, add this new grouping to the grouping value buffer.
 							else
