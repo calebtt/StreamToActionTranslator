@@ -1,6 +1,4 @@
-﻿#pragma once
-
-/*
+﻿/*
 This is free and unencumbered software released into the public domain.
 
 Anyone is free to copy, modify, publish, use, compile, sell, or distribute this software, either in source code form or as a compiled binary, for any purpose, commercial or non-commercial, and by any means.
@@ -11,7 +9,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 For more information, please refer to https://unlicense.org
 */
-
+#pragma once
 #include <iostream>
 #include <span>
 #include <ranges>
@@ -27,6 +25,7 @@ For more information, please refer to https://unlicense.org
 #include <concepts>
 #include <source_location>
 
+#include "flux.h"
 
 namespace sds
 {
@@ -37,16 +36,21 @@ namespace sds
 	using TimePoint_t = chron::time_point <Clock_t, Nanos_t>;
 	using Fn_t = std::function<void()>;
 	using GrpVal_t = int32_t;
+	
 	template<typename T>
 	using SmallVector_t = std::vector<T>;
+
 	template<typename Key_t, typename Val_t>
 	using SmallFlatMap_t = std::map<Key_t, Val_t>;
 
 	enum class RepeatType
 	{
-		Infinite, // Upon the button being held down, will translate to the key-repeat function activating repeatedly using a delay in between repeats.
-		FirstOnly, // Upon the button being held down, will send a single repeat, will not continue translating to repeat after the single repeat.
-		None // No key-repeats sent.
+		// Upon the button being held down, will translate to the key-repeat function activating repeatedly using a delay in between repeats.
+		Infinite, 
+		// Upon the button being held down, will send a single repeat, will not continue translating to repeat after the single repeat.
+		FirstOnly, 
+		// No key-repeats sent.
+		None 
 	};
 
 	enum class ActionState
@@ -58,6 +62,9 @@ namespace sds
 	};
 
 	struct MappingContainer;
+	struct TranslationPack;
+	class Translator;
+
 	// Concept for range of ButtonDescription type that must be contiguous.
 	template<typename T>
 	concept MappingRange_c = requires (T & t)
@@ -65,9 +72,6 @@ namespace sds
 		{ std::same_as<typename T::value_type, MappingContainer> == true };
 		{ std::ranges::contiguous_range<T> == true };
 	};
-
-	struct TranslationPack;
-	class Translator;
 
 	// A translator type, wherein you can call GetUpdatedState with a range of virtual keycode integral values, and get a TranslationPack as a result.
 	template<typename Poller_t>
@@ -96,21 +100,10 @@ namespace sds
 		{ t.UpdateForNewMatchingGroupingUp(1) } -> std::convertible_to<std::optional<int32_t>>;
 	};
 
-	///**
-	// * \brief	Filter concept, used to apply a specific "overtaking" behavior (exclusivity grouping behavior) implementation.
-	// */
-	//template<typename FilterType_t>
-	//concept ValidFilterType_c = requires(FilterType_t & t)
-	//{
-	//	{ FilterType_t{ Translator{{}} } };
-	//	{ t.GetFilteredButtonState({ 1, 2, 3 }) } -> std::convertible_to<SmallVector_t<int32_t>>;
-	//	{ std::movable<FilterType_t> == true };
-	//};
-
 	/**
 	* \brief	DelayTimer manages a non-blocking time delay, it provides functions such as IsElapsed() and Reset(...)
 	*/
-	class DelayTimer final
+	class DelayTimer
 	{
 		TimePoint_t m_start_time{ Clock_t::now() };
 		Nanos_t m_delayTime{}; // this should remain nanoseconds to ensure maximum granularity when Reset() with a different type.
@@ -179,7 +172,7 @@ namespace sds
 	/**
 	 * \brief	Functions called when a state change occurs.
 	 */
-	struct KeyStateBehaviors final
+	struct KeyStateBehaviors
 	{
 		Fn_t OnDown; // Key-down
 		Fn_t OnUp; // Key-up
@@ -192,7 +185,7 @@ namespace sds
 	/**
 	 * \brief	Controller button to action mapping. This is how a mapping of a controller button to an action is described.
 	 */
-	struct ButtonDescription final
+	struct ButtonDescription
 	{
 		/**
 		 * \brief	Controller button Virtual Keycode. Can be platform dependent or custom mapping, depends on input poller behavior.
@@ -231,7 +224,7 @@ namespace sds
 	 *		Also contains last sent time (for key-repeat), and delay before first key-repeat timer.
 	 * \remarks	This class enforces an invariant that it's state cannot be altered out of sequence.
 	 */
-	class MappingStateTracker final
+	class MappingStateTracker
 	{
 		/**
 		 * \brief Key Repeat Delay is the time delay a button has in-between activations.
@@ -292,7 +285,7 @@ namespace sds
 	static_assert(std::copyable<MappingStateTracker>);
 	static_assert(std::movable<MappingStateTracker>);
 
-	struct MappingContainer final
+	struct MappingContainer
 	{
 		/**
 		 * \brief	The mapping description.
@@ -351,7 +344,7 @@ namespace sds
 	 *		design, it would be possible to, for instance, withhold calling the operation to perform, yet still have the mapping's state updating internally, erroneously.
 	 *		I believe this will make calling order-dependent functionality less error-prone.
 	 */
-	struct TranslationResult final
+	struct TranslationResult
 	{
 		// TODO test with std::unique_ptr to Fn_t, it currently is like 18k of stack space.
 		// Operation being requested to be performed, callable
@@ -377,7 +370,7 @@ namespace sds
 	 * \remarks		If using the provided call operator, it will prioritize key-up requests, then key-down requests, then repeat requests, then updates.
 	 *	I figure it should process key-ups and new key-downs with the highest priority, after that keys doing a repeat, and lastly updates.
 	 */
-	struct TranslationPack final
+	struct TranslationPack
 	{
 		void operator()() const
 		{
@@ -508,13 +501,14 @@ namespace sds
 	template<typename Val_t>
 	[[nodiscard]] auto GetButtonTranslationForInitialToDown(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
 	{
-		using std::ranges::find, std::ranges::end;
+		using flux::find;
+		using flux::is_last;
 
 		if (singleButton.LastAction.IsInitialState())
 		{
 			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the down translation.
-			if (findResult != end(downKeys))
+			if (!is_last(downKeys, findResult))
 				return GetInitialKeyDownTranslationResult(singleButton);
 		}
 		return {};
@@ -523,15 +517,21 @@ namespace sds
 	template<typename Val_t>
 	[[nodiscard]] auto GetButtonTranslationForDownToRepeat(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
 	{
-		using std::ranges::find, std::ranges::end;
-		const bool isDownAndUsesRepeat = singleButton.LastAction.IsDown() &&
-			(singleButton.Button.RepeatingKeyBehavior == RepeatType::Infinite || singleButton.Button.RepeatingKeyBehavior == RepeatType::FirstOnly);
+		using flux::find;
+		using flux::is_last;
+
+		const bool isDownAndUsesRepeat = 
+			singleButton.LastAction.IsDown() 
+			&& (singleButton.Button.RepeatingKeyBehavior == RepeatType::Infinite 
+			|| singleButton.Button.RepeatingKeyBehavior == RepeatType::FirstOnly);
+
 		const bool isDelayElapsed = singleButton.LastAction.DelayBeforeFirstRepeat.IsElapsed();
+
 		if (isDownAndUsesRepeat && isDelayElapsed)
 		{
 			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the repeat translation.
-			if (findResult != end(downKeys))
+			if (!is_last(downKeys, findResult))
 				return GetRepeatTranslationResult(singleButton);
 		}
 		return {};
@@ -540,13 +540,15 @@ namespace sds
 	template<typename Val_t>
 	[[nodiscard]] auto GetButtonTranslationForRepeatToRepeat(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
 	{
-		using std::ranges::find, std::ranges::end;
+		using flux::find;
+		using flux::is_last;
+
 		const bool isRepeatAndUsesInfinite = singleButton.LastAction.IsRepeating() && singleButton.Button.RepeatingKeyBehavior == RepeatType::Infinite;
 		if (isRepeatAndUsesInfinite && singleButton.LastAction.LastSentTime.IsElapsed())
 		{
 			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the repeat translation.
-			if (findResult != end(downKeys))
+			if (!is_last(downKeys, findResult))
 				return GetRepeatTranslationResult(singleButton);
 		}
 		return {};
@@ -555,12 +557,13 @@ namespace sds
 	template<typename Val_t>
 	[[nodiscard]] auto GetButtonTranslationForDownOrRepeatToUp(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
 	{
-		using std::ranges::find, std::ranges::end;
+		using flux::find;
+		using flux::is_last;
 		if (singleButton.LastAction.IsDown() || singleButton.LastAction.IsRepeating())
 		{
 			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
 			// If VK is not found in the down list, create the up translation.
-			if (findResult == end(downKeys))
+			if (is_last(downKeys, findResult))
 				return GetKeyUpTranslationResult(singleButton);
 		}
 		return {};
@@ -578,51 +581,25 @@ namespace sds
 	}
 
 	/**
-	* \brief Returns the indices at which a mapping that matches the 'vk' was found. PRECONDITION: A mapping with the specified VK does exist in the mappingsRange!
+	* \brief  Optionally returns the indices at which a mapping that matches the 'vk' was found.
 	* \param vk Virtual keycode of the presumably 'down' key with which to match MappingContainer mappings.
-	* \param mappingsRange The range of MappingContainer mappings for which to return the indices of matching mappings.
+	* \param mappingsRange The range of MappingContainer mappings for which to return the index of a matching mapping.
 	*/
-	[[nodiscard]] auto GetMappingIndexForVk(const NotBoolIntegral_c auto vk, const std::span<const MappingContainer> mappingsRange) -> std::optional<Index_t>
+	[[nodiscard]] auto GetMappingIndexForVk(const NotBoolIntegral_c auto vk, const std::span<const MappingContainer> mappingsRange) noexcept -> std::optional<Index_t>
 	{
-		using std::ranges::find_if;
-		using std::ranges::cend;
-		using std::ranges::cbegin;
-		using std::ranges::distance;
+		using flux::find_if;
+		using flux::is_last;
 
 		const auto findResult = find_if(mappingsRange, [vk](const auto e) { return e.Button.ButtonVirtualKeycode == vk; });
-		const bool didFindResult = findResult != cend(mappingsRange);
+		const bool didFindResult = !is_last(mappingsRange, findResult);
 
-		if (!didFindResult)
-		{
-			throw std::runtime_error(
-				std::vformat("Did not find mapping with vk: {} in mappings range.\nLocation:\n{}\n\n",
-					std::make_format_args(static_cast<int>(vk), std::source_location::current().function_name())));
-		}
-
-		return static_cast<Index_t>(distance(cbegin(mappingsRange), findResult));
-	}
-
-	/**
-	* \brief Returns the iterator at which a mapping that matches the 'vk' was found.
-	* \param vk Virtual keycode of the presumably 'down' key with which to match MappingContainer mappings.
-	* \param mappingsRange The range of MappingContainer mappings for which to return the indices of matching mappings.
-	*/
-	[[nodiscard]] auto GetMappingByVk(const NotBoolIntegral_c auto vk, std::span<const MappingContainer> mappingsRange) -> std::optional<std::span<const MappingContainer>::iterator>
-	{
-		using std::ranges::find_if;
-		using std::ranges::cend;
-		using std::ranges::cbegin;
-		using std::ranges::distance;
-
-		const auto findResult = find_if(mappingsRange, [vk](const auto e) { return e.Button.ButtonVirtualKeycode == vk; });
-		const bool didFindResult = findResult != cend(mappingsRange);
-
+		[[unlikely]]
 		if (!didFindResult)
 		{
 			return {};
 		}
 
-		return findResult;
+		return static_cast<Index_t>(findResult);
 	}
 
 	[[nodiscard]] constexpr auto IsVkInStateUpdate(const NotBoolIntegral_c auto vkToFind, const std::span<const int32_t> downVirtualKeys) noexcept -> bool
@@ -684,6 +661,11 @@ namespace sds
 		return mapping.IsDown() || mapping.IsRepeating();
 	}
 
+	[[nodiscard]] constexpr bool DoesMappingHaveExclusivityGroup(const MappingContainer& mapping)
+	{
+		return mapping.Button.ExclusivityGrouping.has_value();
+	}
+
 	/**
 	 * \brief Encapsulates the mapping buffer, processes controller state updates, returns translation packs.
 	 * \remarks If, before destruction, the mappings are in a state other than initial or awaiting reset, then you may wish to
@@ -691,7 +673,7 @@ namespace sds
 	 *	<p></p>
 	 *	<p>An invariant exists such that: <b>There must be only one mapping per virtual keycode.</b></p>
 	 */
-	class Translator final
+	class Translator
 	{
 		using MappingVector_t = SmallVector_t<MappingContainer>;
 		static_assert(MappingRange_c<MappingVector_t>);
@@ -783,7 +765,7 @@ namespace sds
 	 * \remarks This abstraction manages the currently activated key being "overtaken" by another key from the same group and causing a key-up/down to be sent for the currently activated,
 	 *	as well as moving the key in line behind the newly activated key. A much needed abstraction.
 	 */
-	class GroupActivationInfo final
+	class GroupActivationInfo
 	{
 		using Elem_t = int32_t;
 
@@ -895,7 +877,7 @@ namespace sds
 	 *	it will only process a single overtaking key-down at a time, and will suppress the rest in the state update to be handled on the next iteration.
 	 */
 	template<typename GroupInfo_t = GroupActivationInfo>
-	class OvertakingFilter final
+	class OvertakingFilter
 	{
 		using VirtualCode_t = int32_t;
 
@@ -960,36 +942,31 @@ namespace sds
 
 		[[nodiscard]] auto FilterDownTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate) -> SmallVector_t<VirtualCode_t>
 		{
-			using std::ranges::find;
-			using std::ranges::cend;
-			using std::ranges::views::transform;
-			using std::ranges::views::filter;
-			using std::erase;
+			const auto vkToMappingIndex = [&](const auto vk) -> std::optional<std::size_t>
+			{
+				using flux::find_if;
+				using flux::is_last;
+
+				const auto findResult = find_if(m_mappings, [vk](const auto& e) { return e.Button.ButtonVirtualKeycode == vk; });
+				const bool didFindResult = !is_last(m_mappings, findResult);
+				return didFindResult ? static_cast<std::size_t>(findResult) : std::optional<std::size_t>{};
+			};
+			const auto optWithValueAndGroup = [&](const auto opt) -> bool
+			{
+				return opt.has_value() && GetMappingAt(*opt).Button.ExclusivityGrouping.has_value();
+			};
+			const auto removeOpt = [&](const auto opt)
+			{
+				return opt.value();
+			};
 
 			auto stateUpdateCopy = stateUpdate;
-
-			// filters for all mappings of interest per the current 'down' VK buffer.
-			const auto vkHasMappingPred = [this](const auto vk) -> bool
-				{
-					const auto findResult = GetMappingByVk(vk, m_mappings);
-					return findResult.has_value();
-				};
-			const auto exGroupPred = [this](const auto ind) -> bool
-				{
-					return GetMappingAt(ind).Button.ExclusivityGrouping.has_value();
-				};
-			const auto mappingIndexPred = [this](const auto vk) -> std::size_t
-				{
-					auto findResult = GetMappingIndexForVk(vk, m_mappings);
-					assert(findResult.has_value());
-					return *findResult;
-				};
-
 			SmallVector_t<VirtualCode_t> vksToRemoveRange;
-
-			for (const auto index : stateUpdateCopy | filter(vkHasMappingPred) | transform(mappingIndexPred) | filter(exGroupPred))
+			// This appeared (at this time) to be the best option: 
+			// input vk List -> xform to mapping index list -> filter results to only include non-empty optional and ex. group -> xform to remove the optional = index list of mappings in the state update that have an ex. group.
+			for (const auto& mappingIndex : stateUpdateCopy | std::views::transform(vkToMappingIndex) | std::views::filter(optWithValueAndGroup) | std::views::transform(removeOpt))
 			{
-				const auto& currentMapping = GetMappingAt(index);
+				auto& currentMapping = GetMappingAt(mappingIndex);
 				auto& currentGroup = m_groupMap[*currentMapping.Button.ExclusivityGrouping];
 
 				const auto& [shouldFilter, upOpt] = currentGroup.UpdateForNewMatchingGroupingDown(currentMapping.Button.ButtonVirtualKeycode);
@@ -1011,8 +988,6 @@ namespace sds
 		// it will process only one key per ex. group per iteration. The others will be filtered out and handled on the next iteration.
 		void FilterUpTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate)
 		{
-			using std::ranges::views::filter;
-
 			// filters for all mappings of interest per the current 'down' VK buffer (the UP mappings in this case).
 			const auto exGroupPred = [](const auto& currentMapping)
 				{
@@ -1023,7 +998,7 @@ namespace sds
 					return !IsMappingInRange(currentMapping.Button.ButtonVirtualKeycode, stateUpdate);
 				};
 
-			for (const auto& currentMapping : m_mappings | filter(exGroupPred) | filter(stateUpdateUpPred))
+			for (const auto& currentMapping : flux::ref(m_mappings).filter(exGroupPred).filter(stateUpdateUpPred))
 			{
 				auto& currentGroup = m_groupMap[*currentMapping.Button.ExclusivityGrouping];
 				currentGroup.UpdateForNewMatchingGroupingUp(currentMapping.Button.ButtonVirtualKeycode);
@@ -1045,8 +1020,19 @@ namespace sds
 		 */
 		[[nodiscard]] auto FilterStateUpdateForUniqueExclusivityGroups(SmallVector_t<VirtualCode_t>&& stateUpdate) -> SmallVector_t<VirtualCode_t>
 		{
-			using std::ranges::find_if, std::ranges::cend, std::ranges::find;
+			using flux::find_if;
+			using flux::find;
+			using flux::is_last;
 			using StateRange_t = std::remove_cvref_t<decltype(stateUpdate)>;
+
+			const auto exGroupPred = [this](const auto indOpt) -> bool
+				{
+					return indOpt.has_value() ? GetMappingAt(*indOpt).Button.ExclusivityGrouping.has_value() : false;
+				};
+			const auto mappingIndexPred = [this](const auto vk) -> std::optional<Index_t>
+				{
+					return GetMappingIndexForVk(vk, m_mappings);
+				};
 
 			SmallVector_t<GrpVal_t> groupingValueBuffer;
 			StateRange_t virtualKeycodesToRemove;
@@ -1055,22 +1041,23 @@ namespace sds
 
 			for (const auto vk : stateUpdate)
 			{
-				const auto foundMappingForVk = find_if(m_mappings, [vk](const auto& e)
-					{
-						return e.Button.ButtonVirtualKeycode == vk;
-					});
-				if (foundMappingForVk != cend(m_mappings))
+				// TODO simplify this.
+				//const auto filteredMappingList = flux::ref(m_mappings).map(mappingIndexPred).filter(exGroupPred);//
+
+				const auto mappingIndexOpt = GetMappingIndexForVk(vk, m_mappings);
+				if (mappingIndexOpt.has_value())
 				{
-					if (foundMappingForVk->Button.ExclusivityGrouping)
+					const auto& foundMappingForVk = GetMappingAt(mappingIndexOpt.value());
+					if (foundMappingForVk.Button.ExclusivityGrouping)
 					{
-						const auto grpVal = foundMappingForVk->Button.ExclusivityGrouping.value();
+						const auto grpVal = foundMappingForVk.Button.ExclusivityGrouping.value();
 						auto& currentGroup = m_groupMap[grpVal];
 						if (!currentGroup.IsMappingActivatedOrOvertaken(vk))
 						{
 							const auto groupingFindResult = find(groupingValueBuffer, grpVal);
 
 							// If already in located, being handled groupings, add to remove buffer.
-							if (groupingFindResult != cend(groupingValueBuffer))
+							if (!is_last(groupingValueBuffer, groupingFindResult)) // != cend(groupingValueBuffer))
 								virtualKeycodesToRemove.push_back(vk);
 							// Otherwise, add this new grouping to the grouping value buffer.
 							else

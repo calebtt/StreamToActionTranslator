@@ -9,26 +9,42 @@ if (POLICY CMP0141)
   set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
 endif()
 
-project ("StreamToActionTranslator" CXX)
+project ("StreamToActionTranslator" LANGUAGES CXX)
 
+set(SOURCES          # All .h/.cpp files in src/
+	src/StreamToActionTranslator.h
+    src/flux.h)
 
-# Add source to this project's executable.
+set(TESTFILES        # All .cpp files in tests/
+    tests/rand_gen.h
+    tests/test_utils.h
+    tests/test_main.cpp
+    tests/test_filter.cpp)
+
+set(LIBRARY_NAME StreamToActionTranslator)  # library name (change if you wish)
+
+# Add source to this project's .lib/.dll/.exe
 #add_executable (StreamToActionTranslator  "src/StreamToActionTranslator.h" "src/main.cpp")
-add_library (StreamToActionTranslator OBJECT "src/StreamToActionTranslator.h" )
+add_library (${LIBRARY_NAME} OBJECT ${SOURCES} )
 
-set(TARGET StreamToActionTranslator)
-set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
+set(TARGET ${LIBRARY_NAME})
+set_target_properties(
+    ${LIBRARY_NAME}
+      PROPERTIES
+        CXX_STANDARD 23
+        LINKER_LANGUAGE CXX
+        CXX_STANDARD_REQUIRED YES
+        CXX_EXTENSIONS NO)
 
-if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET StreamToActionTranslator PROPERTY CXX_STANDARD 23)
-endif()
+#set_property(TARGET StreamToActionTranslator PROPERTY CXX_STANDARD 23)
+#set_target_properties(${TARGET} PROPERTIES LINKER_LANGUAGE CXX)
 
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo")
 endif ()
 
-target_include_directories(${TARGET} PUBLIC /src )
+#target_include_directories(${TARGET} PUBLIC "/src" )
 
 enable_testing()
 add_subdirectory(tests)
