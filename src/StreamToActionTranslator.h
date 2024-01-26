@@ -597,7 +597,7 @@ namespace sds
 	{
 		using std::ranges::find_if;
 
-		const auto findResult = find_if(mappingsRange, [vk](const auto e) { return e.Button.ButtonVirtualKeycode == vk; });
+		const auto findResult = find_if(mappingsRange, [uvk = static_cast<uint32_t>(vk)](const auto e) { return e.Button.ButtonVirtualKeycode == uvk; });
 		const bool didFindResult = IsNotEnd(mappingsRange, findResult);
 
 		[[unlikely]]
@@ -891,19 +891,24 @@ namespace sds
 		using VirtualCode_t = int32_t;
 
 		// Mapping of exclusivity grouping value to 
-		using MapType_t = std::map<GrpVal_t, GroupInfo_t>;
+		using GroupInfoMap_t = std::map<GrpVal_t, GroupInfo_t>;
+		// Mapping of grouping value to mapping indices.
+		using GroupIndexMap_t = std::map<GrpVal_t, SmallVector_t<Index_t>>;
 
 		// span to mappings
 		std::span<const MappingContainer> m_mappings;
 
 		// map of grouping value to GroupActivationInfo container.
-		MapType_t m_groupMap;
+		GroupInfoMap_t m_groupMap;
+		GroupIndexMap_t m_groupIndexMap;
 	public:
 		OvertakingFilter() = delete;
 
 		explicit OvertakingFilter(const InputTranslator_c auto& translator)
 		{
-			SetMappingRange(translator.GetMappingsRange());
+			const auto& mappings = translator.GetMappingsRange();
+			SetMappingRange(mappings);
+			BuildGroupingIndices(mappings);
 		}
 
 		// This function is used to filter the controller state updates before they are sent to the translator.
@@ -945,6 +950,23 @@ namespace sds
 				{
 					const auto grpVal = *elem.Button.ExclusivityGrouping;
 					m_groupMap[grpVal] = {};
+				}
+			}
+		}
+
+		// A somewhat important bit of memoization/pre-processing.
+		void BuildGroupingIndices(const std::span<const MappingContainer> mappingsList)
+		{
+			using std::views::enumerate;
+			m_groupIndexMap = {};
+
+			// Build the map of ex. group information.
+			for (const auto& [index, elem] : enumerate(mappingsList))
+			{
+				if (elem.Button.ExclusivityGrouping)
+				{
+					const auto grpVal = *elem.Button.ExclusivityGrouping;
+					m_groupIndexMap[grpVal].push_back(index);
 				}
 			}
 		}
@@ -1001,16 +1023,14 @@ namespace sds
 		{
 			using std::views::filter;
 			// filters for all mappings of interest per the current 'down' VK buffer (the UP mappings in this case).
-			const auto exGroupPred = [](const auto& currentMapping)
-				{
-					return currentMapping.Button.ExclusivityGrouping.has_value();
-				};
-			const auto stateUpdateUpPred = [&stateUpdate](const auto& currentMapping)
-				{
-					return !IsMappingInRange(currentMapping.Button.ButtonVirtualKeycode, stateUpdate);
-				};
+			const auto exGroupAndNotInUpdatePred = [&](const auto& currentMapping)
+			{
+				const bool hasValue = currentMapping.Button.ExclusivityGrouping.has_value();
+				const bool notInUpdate = !IsMappingInRange(currentMapping.Button.ButtonVirtualKeycode, stateUpdate);
+				return hasValue && notInUpdate;
+			};
 
-			for (const auto& currentMapping : m_mappings | filter(exGroupPred) | filter(stateUpdateUpPred))
+			for (const auto& currentMapping : m_mappings | filter(exGroupAndNotInUpdatePred))
 			{
 				auto& currentGroup = m_groupMap[*currentMapping.Button.ExclusivityGrouping];
 				currentGroup.UpdateForNewMatchingGroupingUp(currentMapping.Button.ButtonVirtualKeycode);
@@ -1019,6 +1039,11 @@ namespace sds
 
 	private:
 		[[nodiscard]] constexpr auto GetMappingAt(const std::size_t index) noexcept -> const MappingContainer&
+		{
+			return m_mappings[index];
+		}
+
+		[[nodiscard]] constexpr auto GetMappingAt(const std::optional<std::size_t> index) noexcept -> const MappingContainer&
 		{
 			return m_mappings[index];
 		}
@@ -1034,53 +1059,78 @@ namespace sds
 		{
 			using std::ranges::find_if;
 			using std::ranges::find;
+			using std::views::filter;
+			using std::views::transform;
 			using StateRange_t = std::remove_cvref_t<decltype(stateUpdate)>;
 
-			const auto exGroupPred = [this](const auto indOpt) -> bool
-				{
-					return indOpt.has_value() ? GetMappingAt(*indOpt).Button.ExclusivityGrouping.has_value() : false;
-				};
-			const auto mappingIndexPred = [this](const auto vk) -> std::optional<Index_t>
-				{
-					return GetMappingIndexForVk(vk, m_mappings);
-				};
-
-			SmallVector_t<GrpVal_t> groupingValueBuffer;
-			StateRange_t virtualKeycodesToRemove;
-			groupingValueBuffer.reserve(stateUpdate.size());
-			virtualKeycodesToRemove.reserve(stateUpdate.size());
-
-			for (const auto vk : stateUpdate)
+			const auto exGroupPred = [this](const auto vk) -> bool
 			{
-				// TODO simplify this.
-				//const auto filteredMappingList = flux::ref(m_mappings).map(mappingIndexPred).filter(exGroupPred);//
-
-				const auto mappingIndexOpt = GetMappingIndexForVk(vk, m_mappings);
-				if (mappingIndexOpt.has_value())
+				const auto index = GetMappingIndexForVk(vk, m_mappings);
+				if (index.has_value())
 				{
-					const auto& foundMappingForVk = GetMappingAt(mappingIndexOpt.value());
-					if (foundMappingForVk.Button.ExclusivityGrouping)
-					{
-						const auto grpVal = foundMappingForVk.Button.ExclusivityGrouping.value();
-						auto& currentGroup = m_groupMap[grpVal];
-						if (!currentGroup.IsMappingActivatedOrOvertaken(vk))
-						{
-							const auto groupingFindResult = find(groupingValueBuffer, grpVal);
-
-							// If already in located, being handled groupings, add to remove buffer.
-							if (!IsEnd(groupingValueBuffer, groupingFindResult)) // != cend(groupingValueBuffer))
-								virtualKeycodesToRemove.push_back(vk);
-							// Otherwise, add this new grouping to the grouping value buffer.
-							else
-								groupingValueBuffer.push_back(grpVal);
-						}
-					}
+					return GetMappingAt(*index).Button.ExclusivityGrouping.has_value() ? true : false;
 				}
-			}
+				return false;
+			};
 
-			EraseValuesFromRange(stateUpdate, virtualKeycodesToRemove);
+			// All the vks both in the mappings and has an exclusivity grouping.
+			auto exGroupMappings = stateUpdate | filter(exGroupPred) | transform([this](const auto vk) -> std::optional<const MappingContainer&>
+				{
+					return GetMappingAt(static_cast<uint32_t>(GetMappingIndexForVk(vk, m_mappings)));
+				});
+			const auto groupSortPred = [&](const auto& lhs, const auto& rhs) -> bool
+			{
+				return lhs.Button.ExclusivityGrouping.value() < rhs.Button.ExclusivityGrouping.value();
+			};
+			std::ranges::sort(exGroupMappings, groupSortPred);
+			std::ranges::unique(exGroupMappings);
+			// todo add predicate for the unique operation and then transform it back to a range of vks.
+			//for (const auto elem : m_groupIndexMap)
+			//{
 
-			return stateUpdate;
+			//}
+
+			//std::ranges::sort(exGroupVks, std::ranges::less{});
+
+			// TODO split the mappings list into ex. groups, then sort (if necessary) and unique.
+			//const auto splitGroups = m_mappingsList | std::views::split(groupingPred);
+
+			//SmallVector_t<GrpVal_t> groupingValueBuffer;
+			//StateRange_t virtualKeycodesToRemove;
+			//groupingValueBuffer.reserve(stateUpdate.size());
+			//virtualKeycodesToRemove.reserve(stateUpdate.size());
+
+			//for (const auto vk : stateUpdate)
+			//{
+			//	// TODO simplify this.
+			//	//const auto filteredMappingList = flux::ref(m_mappings).map(mappingIndexPred).filter(exGroupPred);//
+
+			//	const auto mappingIndexOpt = GetMappingIndexForVk(vk, m_mappings);
+			//	if (mappingIndexOpt.has_value())
+			//	{
+			//		const auto& foundMappingForVk = GetMappingAt(mappingIndexOpt.value());
+			//		if (foundMappingForVk.Button.ExclusivityGrouping)
+			//		{
+			//			const auto grpVal = foundMappingForVk.Button.ExclusivityGrouping.value();
+			//			auto& currentGroup = m_groupMap[grpVal];
+			//			if (!currentGroup.IsMappingActivatedOrOvertaken(vk))
+			//			{
+			//				const auto groupingFindResult = find(groupingValueBuffer, grpVal);
+
+			//				// If already in located, being handled groupings, add to remove buffer.
+			//				if (!IsEnd(groupingValueBuffer, groupingFindResult)) // != cend(groupingValueBuffer))
+			//					virtualKeycodesToRemove.push_back(vk);
+			//				// Otherwise, add this new grouping to the grouping value buffer.
+			//				else
+			//					groupingValueBuffer.push_back(grpVal);
+			//			}
+			//		}
+			//	}
+			//}
+
+			//EraseValuesFromRange(stateUpdate, virtualKeycodesToRemove);
+
+			//return stateUpdate;
 		}
 	};
 	static_assert(std::copyable<OvertakingFilter<>>);
