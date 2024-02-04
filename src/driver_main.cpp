@@ -13,5 +13,5 @@
 int main()
 {
 	sds::Translator translator(GetTestDriverMappings(32, 1));
-	sds::OvertakingFilter filter{ translator };
+	sds::OvertakingFilter<> filter{ translator };
 }

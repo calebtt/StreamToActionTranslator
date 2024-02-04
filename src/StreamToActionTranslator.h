@@ -27,6 +27,7 @@ For more information, please refer to https://unlicense.org
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <memory>
 
 namespace sds
 {
@@ -79,7 +80,7 @@ namespace sds
 	concept InputTranslator_c = requires(Poller_t & t)
 	{
 		{ t.GetUpdatedState({ 1, 2, 3 }) } -> std::convertible_to<TranslationPack>;
-		{ t.GetMappingsRange() } -> std::convertible_to<std::vector<MappingContainer>>;
+		{ t.GetMappingsRange() } -> std::convertible_to<std::shared_ptr<SmallVector_t<MappingContainer>>>;
 	};
 
 	template<typename Int_t>
@@ -617,8 +618,8 @@ namespace sds
 		static_assert(MappingRange_c<MappingVector_t>);
 
 		// TODO std::move the vector into a shared_ptr managed memory.
-		//std::shared_ptr<MappingVector_t> m_mappings;
-		MappingVector_t m_mappings;
+		std::shared_ptr<MappingVector_t> m_mappings;
+		//MappingVector_t m_mappings;
 		MappingStateVector_t m_mappingStates;
 	public:
 		Translator() = delete; // no default
@@ -635,14 +636,14 @@ namespace sds
 		 * \exception std::runtime_error on exclusivity group error during construction, OR more than one mapping per VK.
 		 */
 		explicit Translator(MappingRange_c auto&& keyMappings)
-			: m_mappings(std::move(keyMappings))
+			: m_mappings(std::make_shared<MappingVector_t>(std::move(keyMappings)))
 		{
-			if (!AreMappingsUniquePerVk(m_mappings) || !AreMappingVksNonZero(m_mappings))
+			if (!AreMappingsUniquePerVk(*m_mappings) || !AreMappingVksNonZero(*m_mappings))
 				throw std::runtime_error("Exception: More than 1 mapping per VK!");
 			
-			m_mappingStates.resize(m_mappings.size());
+			m_mappingStates.resize(m_mappings->size());
 			// Zip returns a tuple of refs to the types.
-			for (auto zipped : std::views::zip(m_mappings, m_mappingStates))
+			for (auto zipped : std::views::zip(*m_mappings, m_mappingStates))
 			{
 				const auto& mapping = std::get<0>(zipped);
 				auto& mappingState = std::get<1>(zipped);
@@ -659,7 +660,7 @@ namespace sds
 		[[nodiscard]] auto GetUpdatedState(SmallVector_t<int32_t>&& stateUpdate) noexcept -> TranslationPack
 		{
 			TranslationPack translations;
-			for (auto elem : std::views::zip(m_mappings, m_mappingStates))
+			for (auto elem : std::views::zip(*m_mappings, m_mappingStates))
 			{
 				auto& [mapping, mappingState] = elem;
 				if (const auto upToInitial = GetButtonTranslationForUpToInitial(mapping, mappingState))
@@ -690,7 +691,7 @@ namespace sds
 		[[nodiscard]] auto GetCleanupActions() noexcept -> SmallVector_t<TranslationResult>
 		{
 			SmallVector_t<TranslationResult> translations;
-			for (auto elem : std::views::zip(m_mappings, m_mappingStates))
+			for (auto elem : std::views::zip(*m_mappings, m_mappingStates))
 			{
 				auto& [mapping, mappingState] = elem;
 				if (DoesMappingNeedCleanup(mappingState))
@@ -701,7 +702,7 @@ namespace sds
 			return translations;
 		}
 
-		[[nodiscard]] auto GetMappingsRange() const -> const MappingVector_t&
+		[[nodiscard]] auto GetMappingsRange() const -> std::shared_ptr<MappingVector_t>
 		{
 			return m_mappings;
 		}
@@ -835,26 +836,27 @@ namespace sds
 
 		// span to mappings
 		// TODO make shared_ptr/weak_ptr or something to manage the lifetime.
-		std::span<const MappingContainer> m_mappings;
+		std::shared_ptr<const SmallVector_t<MappingContainer>> m_mappings;
 
 		// map of grouping value to GroupActivationInfo container.
 		std::map<GrpVal_t, GroupInfo_t> m_groupMap;
 		// Mapping of grouping value to mapping indices.
 		std::map<GrpVal_t, std::set<VirtualCode_t>> m_groupToVkMap;
-		std::set<VirtualCode_t> m_allVirtualKeycodes; // No particular order, use contains().
+		std::set<VirtualCode_t> m_allVirtualKeycodes; // Order does not match mappings
 		std::map<int32_t, std::size_t> m_vkToIndexMap;
 	public:
 		OvertakingFilter() = delete;
 
 		explicit OvertakingFilter(const InputTranslator_c auto& translator)
 		{
-			const auto& mappings = translator.GetMappingsRange();
-			SetMappingRange(mappings);
+			auto pMappings = translator.GetMappingsRange();
+
+			SetMappingRange(pMappings);
 		}
 
 		// This function is used to filter the controller state updates before they are sent to the translator.
 		// It will have an effect on overtaking behavior by modifying the state update buffer, which just contains the virtual keycodes that are reported as down.
-		[[nodiscard]] auto GetFilteredButtonState(SmallVector_t<VirtualCode_t>&& stateUpdate) -> SmallVector_t<VirtualCode_t>
+		[[nodiscard]] auto GetFilteredButtonState(const SmallVector_t<VirtualCode_t>& stateUpdate) -> SmallVector_t<VirtualCode_t>
 		{
 			using std::ranges::sort;
 			using std::views::filter;
@@ -863,12 +865,12 @@ namespace sds
 			//sort(stateUpdate, std::ranges::less{}); // TODO <-- problem for the (current) unit testing, optional anyway
 
 			// Filters out VKs that don't have any corresponding mapping.
-			auto filteredUpdate = stateUpdate | filter([this](const auto vk) { return m_allVirtualKeycodes.contains(vk); });
-			stateUpdate = { filteredUpdate.cbegin(), filteredUpdate.cend() };
+			auto filteredUpdateView = stateUpdate | filter([this](const auto vk) { return m_allVirtualKeycodes.contains(vk); });
+			const std::vector<int32_t> filteredStateUpdate = { filteredUpdateView.cbegin(), filteredUpdateView.cend() };
 
-			stateUpdate = GetNonUniqueGroupElements(stateUpdate);
+			const auto uniqueGrouped = GetNonUniqueGroupElements(filteredStateUpdate);
 
-			auto filteredForDown = FilterDownTranslation(stateUpdate);
+			const auto filteredForDown = FilterDownTranslation(uniqueGrouped);
 
 			// There appears to be no reason to report additional VKs that will become 'down' after a key is moved to up,
 			// because for the key to still be in the overtaken queue, it would need to still be 'down' as well, and thus handled
@@ -878,13 +880,13 @@ namespace sds
 			return filteredForDown;
 		}
 
-		auto operator()(SmallVector_t<VirtualCode_t> stateUpdate) -> SmallVector_t<VirtualCode_t>
+		auto operator()(const SmallVector_t<VirtualCode_t>& stateUpdate) -> SmallVector_t<VirtualCode_t>
 		{
-			return GetFilteredButtonState(std::move(stateUpdate));
+			return GetFilteredButtonState(stateUpdate);
 		}
 	private:
 
-		void SetMappingRange(const std::span<const MappingContainer> mappingsList)
+		void SetMappingRange(const std::shared_ptr<const SmallVector_t<MappingContainer>>& mappingsList)
 		{
 			m_mappings = mappingsList;
 			m_allVirtualKeycodes = {};
@@ -892,15 +894,15 @@ namespace sds
 			m_groupToVkMap = {};
 			m_vkToIndexMap = {};
 
-			BuildAllMemos(mappingsList);
+			BuildAllMemos(m_mappings);
 		}
 
 		// A somewhat important bit of memoization/pre-processing.
-		void BuildAllMemos(const std::span<const MappingContainer> mappingsList)
+		void BuildAllMemos(const std::shared_ptr<const SmallVector_t<MappingContainer>>& mappingsList)
 		{
 			using std::views::enumerate;
 
-			for (const auto& [index, elem] : enumerate(mappingsList))
+			for (const auto& [index, elem] : enumerate(*mappingsList))
 			{
 				// all vk set
 				m_allVirtualKeycodes.insert(elem.ButtonVirtualKeycode);
@@ -924,10 +926,11 @@ namespace sds
 			const auto vkToMappingIndex = [&](const auto vk) -> std::optional<std::size_t>
 				{
 					using std::ranges::find_if;
-
-					const auto findResult = find_if(m_mappings, [vk](const auto& e) { return e.ButtonVirtualKeycode == vk; });
-					const bool didFindResult = IsNotEnd(m_mappings, findResult);
-					return didFindResult ? static_cast<std::size_t>(std::distance(m_mappings.cbegin(), findResult)) : std::optional<std::size_t>{};
+					if (m_allVirtualKeycodes.contains(vk))
+					{
+						return m_vkToIndexMap[vk];
+					}
+					return {};
 				};
 			const auto optWithValueAndGroup = [&](const auto opt) -> bool
 				{
@@ -973,7 +976,7 @@ namespace sds
 					return hasValue && notInUpdate;
 				};
 
-			for (const auto& currentMapping : m_mappings | filter(exGroupAndNotInUpdatePred))
+			for (const auto& currentMapping : (*m_mappings) | filter(exGroupAndNotInUpdatePred))
 			{
 				auto& currentGroup = m_groupMap[*currentMapping.ExclusivityGrouping];
 				currentGroup.UpdateForNewMatchingGroupingUp(currentMapping.ButtonVirtualKeycode);
@@ -983,12 +986,12 @@ namespace sds
 	private:
 		[[nodiscard]] constexpr auto GetMappingAt(const NotBoolIntegral_c auto index) noexcept -> const MappingContainer&
 		{
-			return m_mappings[static_cast<std::size_t>(index)];
+			return m_mappings->at(static_cast<std::size_t>(index));
 		}
 
 		[[nodiscard]] constexpr auto GetMappingForVk(const NotBoolIntegral_c auto vk) noexcept -> const MappingContainer&
 		{
-			auto ind = GetMappingIndexForVk(vk, m_mappings);
+			auto ind = GetMappingIndexForVk(vk, *m_mappings);
 			assert(ind.has_value());
 			return GetMappingAt(*ind);
 		}
@@ -1007,7 +1010,7 @@ namespace sds
 			for (const auto vk : stateUpdate)
 			{
 				const auto mappingIndex = m_vkToIndexMap[vk];
-				const auto& foundMappingForVk = m_mappings[mappingIndex];
+				const auto& foundMappingForVk = GetMappingAt(mappingIndex);
 
 				if (foundMappingForVk.ExclusivityGrouping)
 				{
@@ -1032,6 +1035,4 @@ namespace sds
 	};
 	static_assert(std::copyable<OvertakingFilter<>>);
 	static_assert(std::movable<OvertakingFilter<>>);
-	//static_assert(ValidFilterType_c<OvertakingFilter<>> == true);
-
 }
