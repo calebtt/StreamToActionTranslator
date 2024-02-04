@@ -62,7 +62,7 @@ auto GetPrintBehaviorsForKey(const std::string keyName) -> sds::KeyStateBehavior
 }
 
 // Mappings buffer for the test driver, with a single group.
-auto GetTestDriverMappings(size_t count = 100, const int beginId = 1) -> std::vector<sds::MappingContainer>
+auto GetTestDriverMappings(size_t count = 32, const int beginId = 1) -> std::vector<sds::MappingContainer>
 {
 	using namespace sds;
 	using std::cout, std::println;
@@ -75,8 +75,10 @@ auto GetTestDriverMappings(size_t count = 100, const int beginId = 1) -> std::ve
 		{
 			return MappingContainer
 			{
-				ButtonDescription{i, {}, Grouping},
-				KeyStateBehaviors{GetPrintBehaviorsForKey(std::to_string(i))}
+				.ButtonVirtualKeycode = i,
+				.ExclusivityGrouping = Grouping,
+				.DelayBeforeFirstRepeat = 0s,
+				.BetweenRepeatDelay = 0s,
 			};
 		});
 
@@ -86,7 +88,7 @@ auto GetTestDriverMappings(size_t count = 100, const int beginId = 1) -> std::ve
 // Range of mapping IDs, from the mappings buffer.
 auto GetMappingIdRange(const std::vector<sds::MappingContainer>& mappings) -> std::vector<int>
 {
-	auto idRange = mappings | std::views::transform([](const sds::MappingContainer& m) { return m.Button.ButtonVirtualKeycode; });
+	auto idRange = mappings | std::views::transform([](const sds::MappingContainer& m) { return m.ButtonVirtualKeycode; });
 	return std::ranges::to<std::vector<int>>(idRange);
 }
 
@@ -136,11 +138,11 @@ auto GetBuiltFilter(const auto& translator)
 auto getMappingWithId(int id, int group)
 {
 	using namespace std::chrono_literals;
-	return 	sds::MappingContainer
+	return sds::MappingContainer
 	{
-		sds::ButtonDescription{id, {}, group},
-		sds::KeyStateBehaviors{},
-		0s,
-		0s
+		.ButtonVirtualKeycode = id,
+		.ExclusivityGrouping = group,
+		.DelayBeforeFirstRepeat = 0s,
+		.BetweenRepeatDelay = 0s,
 	};
 }

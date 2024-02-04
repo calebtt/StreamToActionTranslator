@@ -33,8 +33,11 @@ int TestFilter()
 	using namespace std::chrono_literals;
 	using namespace std::chrono;
 
-	FilterFixture fixt;
-	sds::OvertakingFilter filt{ fixt };
+	auto mappings = GetTestDriverMappings();
+	
+	FilterFixture translator;
+	//sds::Translator translator{ GetTestDriverMappings() };
+	sds::OvertakingFilter filt{ translator };
 
 	// Begin clock start
 	const auto startTime = steady_clock::now();
