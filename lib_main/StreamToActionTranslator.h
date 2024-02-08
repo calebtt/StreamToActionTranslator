@@ -540,7 +540,7 @@ namespace sds
 	{
 		using std::ranges::find_if;
 
-		const auto findResult = find_if(mappingsRange, [vk](const auto e) { return e.ButtonVirtualKeycode == static_cast<decltype(e.ButtonVirtualKeycode)>(vk); });
+		const auto findResult = find_if(mappingsRange, [vk](const auto& e) { return e.ButtonVirtualKeycode == static_cast<decltype(e.ButtonVirtualKeycode)>(vk); });
 		const bool didFindResult = IsNotEnd(mappingsRange, findResult);
 
 		[[unlikely]]
