@@ -4,18 +4,22 @@
 cmake_minimum_required (VERSION 3.8)
 
 set(TEST_TARGET test_main)
-add_executable(${TEST_TARGET} ${TEST_TARGET}.cpp "test_utils.h")
+add_executable(${TEST_TARGET} ${TEST_TARGET}.cpp "test_utils.h" )
 add_test(NAME ${TEST_TARGET} COMMAND $<TARGET_FILE:${TEST_TARGET}>)
-target_include_directories(${TEST_TARGET} PUBLIC . ../src )
+target_compile_features(${TEST_TARGET} PUBLIC cxx_std_23)
+target_include_directories(${TEST_TARGET} PUBLIC . ../lib_main )
+target_link_libraries(${TEST_TARGET} INTERFACE ${LIBRARY_NAME})
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET test_main PROPERTY CXX_STANDARD 23)
 endif()
 
 set(TEST_TARGET test_filter)
-add_executable(${TEST_TARGET} ${TEST_TARGET}.cpp "test_utils.h")
+add_executable(${TEST_TARGET} ${TEST_TARGET}.cpp "test_utils.h" )
 add_test(NAME ${TEST_TARGET} COMMAND $<TARGET_FILE:${TEST_TARGET}>)
-target_include_directories(${TEST_TARGET} PUBLIC . ../src )
+target_compile_features(${TEST_TARGET} PUBLIC cxx_std_23)
+target_include_directories(${TEST_TARGET} PUBLIC . ../lib_main )
+target_link_libraries(${TEST_TARGET} INTERFACE ${LIBRARY_NAME})
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET test_filter PROPERTY CXX_STANDARD 23)
