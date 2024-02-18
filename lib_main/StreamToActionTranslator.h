@@ -32,12 +32,12 @@ For more information, please refer to https://unlicense.org
 namespace sds
 {
 	namespace chron = std::chrono;
-	using Index_t = uint32_t;
+	using Index_t = uint16_t;
 	using Nanos_t = chron::nanoseconds;
 	using Clock_t = chron::steady_clock;
 	using TimePoint_t = chron::time_point <Clock_t, Nanos_t>;
 	using Fn_t = std::function<void()>;
-	using GrpVal_t = int32_t;
+	using GrpVal_t = int16_t;
 
 	template<typename T>
 	using SmallVector_t = std::vector<T>;
@@ -109,7 +109,6 @@ namespace sds
 	{
 		TimePoint_t m_start_time{ Clock_t::now() };
 		Nanos_t m_delayTime{}; // this should remain nanoseconds to ensure maximum granularity when Reset() with a different type.
-		mutable bool m_has_fired{ false };
 	public:
 		static constexpr Nanos_t DefaultKeyRepeatDelay{ std::chrono::milliseconds{1} };
 	public:
@@ -119,19 +118,7 @@ namespace sds
 		DelayTimer(DelayTimer&& other) = default;
 		DelayTimer& operator=(const DelayTimer& other) = default;
 		DelayTimer& operator=(DelayTimer&& other) = default;
-		~DelayTimer() = default;
-		/**
-		 * \brief	Operator<< overload for ostream specialization, writes more detailed delay details for debugging.
-		 */
-		friend std::ostream& operator<<(std::ostream& os, const DelayTimer& obj) noexcept
-		{
-			os << "[DelayTimer]" << '\n'
-				<< "m_start_time:" << obj.m_start_time.time_since_epoch() << '\n'
-				<< "m_delayTime:" << obj.m_delayTime << '\n'
-				<< "m_has_fired:" << obj.m_has_fired << '\n'
-				<< "[/DelayTimer]";
-			return os;
-		}
+		~DelayTimer() noexcept = default;
 		/**
 		 * \brief	Check for elapsed.
 		 * \return	true if timer has elapsed, false otherwise
@@ -141,7 +128,6 @@ namespace sds
 		{
 			if (Clock_t::now() > (m_start_time + m_delayTime))
 			{
-				m_has_fired = true;
 				return true;
 			}
 			return false;
@@ -153,7 +139,6 @@ namespace sds
 		void Reset(const Nanos_t delay) noexcept
 		{
 			m_start_time = Clock_t::now();
-			m_has_fired = false;
 			m_delayTime = { delay };
 		}
 		/**
@@ -162,7 +147,6 @@ namespace sds
 		void Reset() noexcept
 		{
 			m_start_time = Clock_t::now();
-			m_has_fired = false;
 		}
 		/**
 		 * \brief	Gets the current timer period/duration for elapsing.
@@ -173,18 +157,18 @@ namespace sds
 		}
 	};
 
-	/**
-	 * \brief	Functions called when a state change occurs.
-	 */
-	struct KeyStateBehaviors
-	{
-		Fn_t OnDown; // Key-down
-		Fn_t OnUp; // Key-up
-		Fn_t OnRepeat; // Key-repeat
-		Fn_t OnReset; // Reset after key-up and prior to another key-down can be performed
-	};
-	static_assert(std::copyable<KeyStateBehaviors>);
-	static_assert(std::movable<KeyStateBehaviors>);
+	///**
+	// * \brief	Functions called when a state change occurs.
+	// */
+	//struct KeyStateBehaviors
+	//{
+	//	Fn_t OnDown; // Key-down
+	//	Fn_t OnUp; // Key-up
+	//	Fn_t OnRepeat; // Key-repeat
+	//	Fn_t OnReset; // Reset after key-up and prior to another key-down can be performed
+	//};
+	//static_assert(std::copyable<KeyStateBehaviors>);
+	//static_assert(std::movable<KeyStateBehaviors>);
 
 	/**
 	 * \brief	Wrapper for button to action mapping state enum, the least I can do is make sure state modifications occur through a managing class,
@@ -617,9 +601,7 @@ namespace sds
 		using MappingStateVector_t = SmallVector_t<MappingStateTracker>;
 		static_assert(MappingRange_c<MappingVector_t>);
 
-		// TODO std::move the vector into a shared_ptr managed memory.
 		std::shared_ptr<MappingVector_t> m_mappings;
-		//MappingVector_t m_mappings;
 		MappingStateVector_t m_mappingStates;
 	public:
 		Translator() = delete; // no default
@@ -702,7 +684,7 @@ namespace sds
 			return translations;
 		}
 
-		[[nodiscard]] auto GetMappingsRange() const -> std::shared_ptr<MappingVector_t>
+		[[nodiscard]] auto GetMappingsRange() const noexcept -> std::shared_ptr<MappingVector_t>
 		{
 			return m_mappings;
 		}
@@ -773,12 +755,12 @@ namespace sds
 				// Case wherein the currently activated mapping is the one getting a key-up.
 				if (isInFirstPosition)
 				{
-					if (ActivatedValuesQueue.size() > 1)
+					if (!ActivatedValuesQueue.empty())
 					{
 						// If there is an overtaken queue, key-down the next key in line.
 						ActivatedValuesQueue.pop_front();
 						// Return the new front hash to be sent a key-down.
-						return ActivatedValuesQueue.front();
+						return !ActivatedValuesQueue.empty() ? ActivatedValuesQueue.front() : std::optional<Elem_t>{};
 					}
 				}
 
@@ -806,7 +788,8 @@ namespace sds
 			const bool isFound = findResult != std::ranges::cend(ActivatedValuesQueue);
 			return !isCurrentActivation && isFound;
 		}
-		[[nodiscard]] bool IsAnyMappingActivated() const noexcept {
+		[[nodiscard]] bool IsAnyMappingActivated() const noexcept 
+		{
 			return !ActivatedValuesQueue.empty();
 		}
 		[[nodiscard]] bool IsMappingActivatedOrOvertaken(const Elem_t vk) const noexcept
@@ -834,20 +817,20 @@ namespace sds
 	{
 		using VirtualCode_t = int32_t; 
 
+		std::set<VirtualCode_t> m_allVirtualKeycodes; // Order does not match mappings
 		// span to mappings
-		// TODO make shared_ptr/weak_ptr or something to manage the lifetime.
 		std::shared_ptr<const SmallVector_t<MappingContainer>> m_mappings;
 
 		// map of grouping value to GroupActivationInfo container.
 		std::map<GrpVal_t, GroupInfo_t> m_groupMap;
 		// Mapping of grouping value to mapping indices.
 		std::map<GrpVal_t, std::set<VirtualCode_t>> m_groupToVkMap;
-		std::set<VirtualCode_t> m_allVirtualKeycodes; // Order does not match mappings
-		std::map<int32_t, std::size_t> m_vkToIndexMap;
+		
+		std::map<int32_t, Index_t> m_vkToIndexMap;
 	public:
-		OvertakingFilter() = delete;
+		OvertakingFilter() noexcept = delete;
 
-		explicit OvertakingFilter(const InputTranslator_c auto& translator)
+		explicit OvertakingFilter(const InputTranslator_c auto& translator) noexcept
 		{
 			auto pMappings = translator.GetMappingsRange();
 
@@ -856,7 +839,7 @@ namespace sds
 
 		// This function is used to filter the controller state updates before they are sent to the translator.
 		// It will have an effect on overtaking behavior by modifying the state update buffer, which just contains the virtual keycodes that are reported as down.
-		[[nodiscard]] auto GetFilteredButtonState(const SmallVector_t<VirtualCode_t>& stateUpdate) -> SmallVector_t<VirtualCode_t>
+		[[nodiscard]] auto GetFilteredButtonState(const SmallVector_t<VirtualCode_t>& stateUpdate) noexcept -> SmallVector_t<VirtualCode_t>
 		{
 			using std::ranges::sort;
 			using std::views::filter;
@@ -880,13 +863,13 @@ namespace sds
 			return filteredForDown;
 		}
 
-		auto operator()(const SmallVector_t<VirtualCode_t>& stateUpdate) -> SmallVector_t<VirtualCode_t>
+		auto operator()(const SmallVector_t<VirtualCode_t>& stateUpdate) noexcept -> SmallVector_t<VirtualCode_t>
 		{
 			return GetFilteredButtonState(stateUpdate);
 		}
 	private:
 
-		void SetMappingRange(const std::shared_ptr<const SmallVector_t<MappingContainer>>& mappingsList)
+		void SetMappingRange(const std::shared_ptr<const SmallVector_t<MappingContainer>>& mappingsList) noexcept
 		{
 			m_mappings = mappingsList;
 			m_allVirtualKeycodes = {};
@@ -898,7 +881,7 @@ namespace sds
 		}
 
 		// A somewhat important bit of memoization/pre-processing.
-		void BuildAllMemos(const std::shared_ptr<const SmallVector_t<MappingContainer>>& mappingsList)
+		void BuildAllMemos(const std::shared_ptr<const SmallVector_t<MappingContainer>>& mappingsList) noexcept
 		{
 			using std::views::enumerate;
 
@@ -906,7 +889,7 @@ namespace sds
 			{
 				// all vk set
 				m_allVirtualKeycodes.insert(elem.ButtonVirtualKeycode);
-				m_vkToIndexMap[elem.ButtonVirtualKeycode] = static_cast<std::size_t>(index);
+				m_vkToIndexMap[elem.ButtonVirtualKeycode] = static_cast<Index_t>(index);
 
 				if (elem.ExclusivityGrouping)
 				{
@@ -918,12 +901,12 @@ namespace sds
 			}
 		}
 
-		[[nodiscard]] auto FilterDownTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate) -> SmallVector_t<VirtualCode_t>
+		[[nodiscard]] auto FilterDownTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate) noexcept -> SmallVector_t<VirtualCode_t>
 		{
 			using std::views::filter;
 			using std::views::transform;
 
-			const auto vkToMappingIndex = [&](const auto vk) -> std::optional<std::size_t>
+			const auto vkToMappingIndex = [&](const auto vk) -> std::optional<Index_t>
 				{
 					using std::ranges::find_if;
 					if (m_allVirtualKeycodes.contains(vk))
@@ -965,7 +948,7 @@ namespace sds
 		}
 
 		// it will process only one key per ex. group per iteration. The others will be filtered out and handled on the next iteration.
-		void FilterUpTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate)
+		void FilterUpTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate) noexcept
 		{
 			using std::views::filter;
 			// filters for all mappings of interest per the current 'down' VK buffer (the UP mappings in this case).
@@ -986,7 +969,7 @@ namespace sds
 	private:
 		[[nodiscard]] constexpr auto GetMappingAt(const NotBoolIntegral_c auto index) noexcept -> const MappingContainer&
 		{
-			return m_mappings->at(static_cast<std::size_t>(index));
+			return m_mappings->at(static_cast<Index_t>(index));
 		}
 
 		[[nodiscard]] constexpr auto GetMappingForVk(const NotBoolIntegral_c auto vk) noexcept -> const MappingContainer&
@@ -997,7 +980,7 @@ namespace sds
 		}
 
 		// Pre: VKs in state update do have a mapping.
-		[[nodiscard]] auto GetNonUniqueGroupElements(const SmallVector_t<int32_t>& stateUpdate) -> SmallVector_t<int32_t>
+		[[nodiscard]] auto GetNonUniqueGroupElements(const SmallVector_t<int32_t>& stateUpdate) noexcept -> SmallVector_t<int32_t>
 		{
 			using std::ranges::find, std::ranges::cend;
 			using StateRange_t = std::remove_cvref_t<decltype(stateUpdate)>;

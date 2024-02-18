@@ -13,17 +13,18 @@ endif()
 
 project ("StreamToActionTranslator" LANGUAGES CXX)
 set(LIBRARY_NAME StreamToActionTranslator)  # library name (change if you wish)
-set(LIB_SOURCES lib_main/StreamToActionTranslator.h) # all library source files
+set(LIB_SOURCES lib_main/StreamToActionTranslator.h ) # all library source files
 
 # Note: The 'INTERFACE' keyword here is used because there is no .cpp source files for this library.
-add_library(${LIBRARY_NAME} INTERFACE ${LIB_SOURCES})
+add_library(${LIBRARY_NAME} INTERFACE ${LIB_SOURCES} )
 target_compile_features(${LIBRARY_NAME} INTERFACE cxx_std_23)
 target_link_libraries(${LIBRARY_NAME} INTERFACE ${LIB_SOURCES})
 
-#if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-#    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
-#    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo")
-#endif ()
+set(DRIVER_NAME StreamToActionTranslatorApp)  # driver name (change if you wish)
+add_executable (${DRIVER_NAME} "src/driver_main.cpp"  )
+target_compile_features(${DRIVER_NAME} PUBLIC cxx_std_23)
+
+
 
 enable_testing()
 add_subdirectory(tests)

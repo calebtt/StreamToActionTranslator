@@ -48,18 +48,18 @@ auto GetPrintDurationsString(const auto dur) -> std::string
 	return ss.str();
 }
 
-auto GetPrintBehaviorsForKey(const std::string keyName) -> sds::KeyStateBehaviors
-{
-	using std::cout;
-	sds::KeyStateBehaviors behaviors
-	{
-		//.OnDown = [=]() { cout << "[" << keyName << "]-[OnDown]\n"; },
-		//.OnUp = [=]() { cout << "[" << keyName << "]-[OnUp]\n"; },
-		//.OnRepeat = [=]() { cout << "[" << keyName << "]-[OnRepeat]\n"; },
-		//.OnReset = [=]() { cout << "[" << keyName << "]-[OnReset]\n"; }
-	};
-	return behaviors;
-}
+//auto GetPrintBehaviorsForKey(const std::string keyName) -> sds::KeyStateBehaviors
+//{
+//	using std::cout;
+//	sds::KeyStateBehaviors behaviors
+//	{
+//		//.OnDown = [=]() { cout << "[" << keyName << "]-[OnDown]\n"; },
+//		//.OnUp = [=]() { cout << "[" << keyName << "]-[OnUp]\n"; },
+//		//.OnRepeat = [=]() { cout << "[" << keyName << "]-[OnRepeat]\n"; },
+//		//.OnReset = [=]() { cout << "[" << keyName << "]-[OnReset]\n"; }
+//	};
+//	return behaviors;
+//}
 
 // Mappings buffer for the test driver, with a single group.
 auto GetTestDriverMappings(size_t count = 32, const int beginId = 1) -> std::vector<sds::MappingContainer>
