@@ -348,7 +348,7 @@ auto GetDriverButtonMappings()
     constexpr int LeftThumbGroup = 101; // Left thumbstick exclusivity grouping.
     const auto PrintMessageAndTime = [](std::string_view msg)
         {
-            cout << msg << " @" << GetEpochTimestamp() << '\n';
+            std::println("{} @{}", msg, GetEpochTimestamp());
         };
     const auto GetDownLambdaForKeyNamed = [=](const std::string& keyName)
         {
@@ -378,7 +378,8 @@ auto GetDriverButtonMappings()
                 .ButtonVirtualKeycode = virtualKey,
                 .RepeatingKeyBehavior = sds::RepeatType::Infinite,
                 .ExclusivityGrouping = exGroup,
-                .DelayBeforeFirstRepeat = firstDelay
+                .DelayBeforeFirstRepeat = firstDelay,
+                //.BetweenRepeatDelay = std::chrono::milliseconds(100)
             };
         };
 
@@ -570,7 +571,7 @@ inline void TranslationLoop(sds::Translator& translator, sds::OvertakingFilter<>
     using namespace std::chrono_literals;
     const auto translation = translator(filter(GetWrappedLegacyApiStateUpdate(KeyboardSettings::ButtonCodeArray, 0)));
     translation();
-    std::this_thread::sleep_for(sleepDelay);
+    //std::this_thread::sleep_for(sleepDelay);
 }
 
 auto RunTestDriverLoop()
@@ -581,7 +582,9 @@ auto RunTestDriverLoop()
     auto mapBuffer = GetDriverButtonMappings();
     mapBuffer.append_range(GetDriverMouseMappings());
 
+    std::cout << "Test driver program for XBOX 360 controller (or another XINPUT device.)\n";
     std::cout << std::vformat("Created mappings buffer with {} mappings. Total size: {} bytes.\n", std::make_format_args(mapBuffer.size(), sizeof(mapBuffer.front()) * mapBuffer.size()));
+    std::cout << "Starting poll loop for player 0\n";
     
     // Mappings are then moved into the translator at construction.
     sds::Translator translator{ std::move(mapBuffer) };

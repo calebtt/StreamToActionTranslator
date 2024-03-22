@@ -634,12 +634,12 @@ namespace sds
 			}
 		}
 	public:
-		[[nodiscard]] auto operator()(SmallVector_t<int32_t> stateUpdate) noexcept -> TranslationPack
+		[[nodiscard]] auto operator()(const SmallVector_t<int32_t>& stateUpdate) noexcept -> TranslationPack
 		{
-			return GetUpdatedState(std::move(stateUpdate));
+			return GetUpdatedState(stateUpdate);
 		}
 
-		[[nodiscard]] auto GetUpdatedState(SmallVector_t<int32_t>&& stateUpdate) noexcept -> TranslationPack
+		[[nodiscard]] auto GetUpdatedState(const SmallVector_t<int32_t>& stateUpdate) noexcept -> TranslationPack
 		{
 			TranslationPack translations;
 			for (auto elem : std::views::zip(*m_mappings, m_mappingStates))
