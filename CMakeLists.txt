@@ -9,22 +9,13 @@ if (POLICY CMP0141)
   set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
 endif()
 
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++latest")
-
 project ("StreamToActionTranslator" LANGUAGES CXX)
-set(LIBRARY_NAME StreamToActionTranslator)  # library name (change if you wish)
-set(LIB_SOURCES lib_main/StreamToActionTranslator.h ) # all library source files
 
-# Note: The 'INTERFACE' keyword here is used because there is no .cpp source files for this library.
-add_library(${LIBRARY_NAME} INTERFACE ${LIB_SOURCES} )
-target_compile_features(${LIBRARY_NAME} INTERFACE cxx_std_23)
-target_link_libraries(${LIBRARY_NAME} INTERFACE ${LIB_SOURCES})
 
 set(DRIVER_NAME StreamToActionTranslatorApp)  # driver name (change if you wish)
 add_executable (${DRIVER_NAME} "src/driver_main.cpp"  )
 target_compile_features(${DRIVER_NAME} PUBLIC cxx_std_23)
 
-
-
 enable_testing()
 add_subdirectory(tests)
+add_subdirectory(src)

@@ -20,8 +20,7 @@
 #include <numbers>
 #include <numeric>
 
-#include "../lib_main/StreamToActionTranslator.h"
-//#include "../tests/test_utils.h"
+#include "StreamToActionTranslator.h"
 #define NOMINMAX
 #include <Windows.h>
 #include <Xinput.h>

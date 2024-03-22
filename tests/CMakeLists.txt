@@ -1,7 +1,8 @@
-# CMakeList.txt : CMake project for tests, include source and define
-# project specific logic here.
-#
+# CMakeList.txt : CMake project for tests
+
 cmake_minimum_required (VERSION 3.8)
+
+include_directories(../src)
 
 set(TEST_TARGET test_main)
 add_executable(${TEST_TARGET} ${TEST_TARGET}.cpp "test_utils.h" )
