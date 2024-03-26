@@ -5,9 +5,11 @@
 
 struct FilterFixture
 {
-	std::vector<sds::MappingContainer> Mappings{ GetTestDriverMappings() };
+	using Vector_t = std::vector<sds::MappingContainer>;
+	using Maps_t = std::shared_ptr<Vector_t>;
+	Maps_t Mappings{ std::make_shared<Vector_t>(std::move(GetTestDriverMappings())) };
 
-	auto GetMappingsRange() const -> const std::vector<sds::MappingContainer>&
+	auto GetMappingsRange() const -> const Maps_t
 	{
 		return Mappings;
 	}
@@ -33,8 +35,11 @@ int TestFilter()
 	using namespace std::chrono_literals;
 	using namespace std::chrono;
 
-	FilterFixture fixt;
-	sds::OvertakingFilter filt{ fixt };
+	auto mappings = GetTestDriverMappings();
+	
+	FilterFixture translator;
+	//sds::Translator translator{ GetTestDriverMappings() };
+	sds::OvertakingFilter filt{ translator };
 
 	// Begin clock start
 	const auto startTime = steady_clock::now();

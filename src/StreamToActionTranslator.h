@@ -1,6 +1,4 @@
-﻿#pragma once
-
-/*
+﻿/*
 This is free and unencumbered software released into the public domain.
 
 Anyone is free to copy, modify, publish, use, compile, sell, or distribute this software, either in source code form or as a compiled binary, for any purpose, commercial or non-commercial, and by any means.
@@ -11,7 +9,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 For more information, please refer to https://unlicense.org
 */
-
+#pragma once
 #include <iostream>
 #include <span>
 #include <ranges>
@@ -26,27 +24,35 @@ For more information, please refer to https://unlicense.org
 #include <type_traits>
 #include <concepts>
 #include <source_location>
-
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
+#include <memory>
 
 namespace sds
 {
 	namespace chron = std::chrono;
-	using Index_t = uint32_t;
+	using Index_t = uint16_t;
 	using Nanos_t = chron::nanoseconds;
 	using Clock_t = chron::steady_clock;
 	using TimePoint_t = chron::time_point <Clock_t, Nanos_t>;
 	using Fn_t = std::function<void()>;
-	using GrpVal_t = int32_t;
+	using GrpVal_t = int16_t;
+
 	template<typename T>
 	using SmallVector_t = std::vector<T>;
+
 	template<typename Key_t, typename Val_t>
 	using SmallFlatMap_t = std::map<Key_t, Val_t>;
 
 	enum class RepeatType
 	{
-		Infinite, // Upon the button being held down, will translate to the key-repeat function activating repeatedly using a delay in between repeats.
-		FirstOnly, // Upon the button being held down, will send a single repeat, will not continue translating to repeat after the single repeat.
-		None // No key-repeats sent.
+		// Upon the button being held down, will translate to the key-repeat function activating repeatedly using a delay in between repeats.
+		Infinite,
+		// Upon the button being held down, will send a single repeat, will not continue translating to repeat after the single repeat.
+		FirstOnly,
+		// No key-repeats sent.
+		None
 	};
 
 	enum class ActionState
@@ -58,6 +64,9 @@ namespace sds
 	};
 
 	struct MappingContainer;
+	struct TranslationPack;
+	class Translator;
+
 	// Concept for range of ButtonDescription type that must be contiguous.
 	template<typename T>
 	concept MappingRange_c = requires (T & t)
@@ -66,19 +75,16 @@ namespace sds
 		{ std::ranges::contiguous_range<T> == true };
 	};
 
-	struct TranslationPack;
-	class Translator;
-
 	// A translator type, wherein you can call GetUpdatedState with a range of virtual keycode integral values, and get a TranslationPack as a result.
 	template<typename Poller_t>
 	concept InputTranslator_c = requires(Poller_t & t)
 	{
 		{ t.GetUpdatedState({ 1, 2, 3 }) } -> std::convertible_to<TranslationPack>;
-		{ t.GetMappingsRange() } -> std::convertible_to<std::vector<MappingContainer>>;
+		{ t.GetMappingsRange() } -> std::convertible_to<std::shared_ptr<SmallVector_t<MappingContainer>>>;
 	};
 
 	template<typename Int_t>
-	concept NotBoolIntegral_c = requires(Int_t& t)
+	concept NotBoolIntegral_c = requires(Int_t & t)
 	{
 		{ std::same_as<Int_t, bool> == false };
 		{ std::integral<Int_t> == true };
@@ -96,25 +102,15 @@ namespace sds
 		{ t.UpdateForNewMatchingGroupingUp(1) } -> std::convertible_to<std::optional<int32_t>>;
 	};
 
-	///**
-	// * \brief	Filter concept, used to apply a specific "overtaking" behavior (exclusivity grouping behavior) implementation.
-	// */
-	//template<typename FilterType_t>
-	//concept ValidFilterType_c = requires(FilterType_t & t)
-	//{
-	//	{ FilterType_t{ Translator{{}} } };
-	//	{ t.GetFilteredButtonState({ 1, 2, 3 }) } -> std::convertible_to<SmallVector_t<int32_t>>;
-	//	{ std::movable<FilterType_t> == true };
-	//};
-
 	/**
 	* \brief	DelayTimer manages a non-blocking time delay, it provides functions such as IsElapsed() and Reset(...)
 	*/
-	class DelayTimer final
+	class DelayTimer
 	{
 		TimePoint_t m_start_time{ Clock_t::now() };
 		Nanos_t m_delayTime{}; // this should remain nanoseconds to ensure maximum granularity when Reset() with a different type.
-		mutable bool m_has_fired{ false };
+	public:
+		static constexpr Nanos_t DefaultKeyRepeatDelay{ std::chrono::milliseconds{1} };
 	public:
 		DelayTimer() = delete;
 		explicit DelayTimer(Nanos_t duration) noexcept : m_delayTime(duration) { }
@@ -122,19 +118,7 @@ namespace sds
 		DelayTimer(DelayTimer&& other) = default;
 		DelayTimer& operator=(const DelayTimer& other) = default;
 		DelayTimer& operator=(DelayTimer&& other) = default;
-		~DelayTimer() = default;
-		/**
-		 * \brief	Operator<< overload for ostream specialization, writes more detailed delay details for debugging.
-		 */
-		friend std::ostream& operator<<(std::ostream& os, const DelayTimer& obj) noexcept
-		{
-			os << "[DelayTimer]" << '\n'
-				<< "m_start_time:" << obj.m_start_time.time_since_epoch() << '\n'
-				<< "m_delayTime:" << obj.m_delayTime << '\n'
-				<< "m_has_fired:" << obj.m_has_fired << '\n'
-				<< "[/DelayTimer]";
-			return os;
-		}
+		~DelayTimer() noexcept = default;
 		/**
 		 * \brief	Check for elapsed.
 		 * \return	true if timer has elapsed, false otherwise
@@ -144,7 +128,6 @@ namespace sds
 		{
 			if (Clock_t::now() > (m_start_time + m_delayTime))
 			{
-				m_has_fired = true;
 				return true;
 			}
 			return false;
@@ -156,7 +139,6 @@ namespace sds
 		void Reset(const Nanos_t delay) noexcept
 		{
 			m_start_time = Clock_t::now();
-			m_has_fired = false;
 			m_delayTime = { delay };
 		}
 		/**
@@ -165,7 +147,6 @@ namespace sds
 		void Reset() noexcept
 		{
 			m_start_time = Clock_t::now();
-			m_has_fired = false;
 		}
 		/**
 		 * \brief	Gets the current timer period/duration for elapsing.
@@ -177,61 +158,14 @@ namespace sds
 	};
 
 	/**
-	 * \brief	Functions called when a state change occurs.
-	 */
-	struct KeyStateBehaviors final
-	{
-		Fn_t OnDown; // Key-down
-		Fn_t OnUp; // Key-up
-		Fn_t OnRepeat; // Key-repeat
-		Fn_t OnReset; // Reset after key-up and prior to another key-down can be performed
-	};
-	static_assert(std::copyable<KeyStateBehaviors>);
-	static_assert(std::movable<KeyStateBehaviors>);
-
-	/**
-	 * \brief	Controller button to action mapping. This is how a mapping of a controller button to an action is described.
-	 */
-	struct ButtonDescription final
-	{
-		/**
-		 * \brief	Controller button Virtual Keycode. Can be platform dependent or custom mapping, depends on input poller behavior.
-		 */
-		int32_t ButtonVirtualKeycode{};
-
-		/**
-		 * \brief	Type of key-repeat behavior.
-		 */
-		RepeatType RepeatingKeyBehavior{};
-
-		/**
-		 * \brief	The exclusivity grouping member is intended to allow the user to add different groups of mappings
-		 *	that require another mapping from the same group to be "overtaken" or key-up sent before the "overtaking" new mapping
-		 *	can perform the key-down.
-		 * \remarks		optional, if not in use set to default constructed value or '{}'
-		 */
-		std::optional<GrpVal_t> ExclusivityGrouping; // TODO one variation of ex. group behavior is to have a priority value associated with the mapping.
-	public:
-		ButtonDescription(
-			const int32_t buttonCode,
-			std::optional<RepeatType> repeatBehavior = {},
-			std::optional<GrpVal_t> optExclusivityGrouping = {}) noexcept
-			: ButtonVirtualKeycode(buttonCode),
-			RepeatingKeyBehavior(repeatBehavior.value_or(RepeatType::Infinite)),
-			ExclusivityGrouping(optExclusivityGrouping)
-		{
-		}
-	};
-	static_assert(std::copyable<ButtonDescription>);
-	static_assert(std::movable<ButtonDescription>);
-
-	/**
 	 * \brief	Wrapper for button to action mapping state enum, the least I can do is make sure state modifications occur through a managing class,
 	 *		and that there exists only one 'current' state, and that it can only be a finite set of possibilities.
 	 *		Also contains last sent time (for key-repeat), and delay before first key-repeat timer.
 	 * \remarks	This class enforces an invariant that it's state cannot be altered out of sequence.
 	 */
-	class MappingStateTracker final
+	class 
+		//alignas(std::hardware_constructive_interference_size) 
+		MappingStateTracker
 	{
 		/**
 		 * \brief Key Repeat Delay is the time delay a button has in-between activations.
@@ -292,53 +226,23 @@ namespace sds
 	static_assert(std::copyable<MappingStateTracker>);
 	static_assert(std::movable<MappingStateTracker>);
 
-	struct MappingContainer final
+	struct MappingContainer
 	{
+		Fn_t OnDown; // Key-down
+		Fn_t OnUp; // Key-up
+		Fn_t OnRepeat; // Key-repeat
+		Fn_t OnReset; // Reset after key-up and prior to another key-down can be performed
+		int32_t ButtonVirtualKeycode{};
+		RepeatType RepeatingKeyBehavior{};
 		/**
-		 * \brief	The mapping description.
+		 * \brief	The exclusivity grouping member is intended to allow the user to add different groups of mappings
+		 *	that require another mapping from the same group to be "overtaken" or key-up sent before the "overtaking" new mapping
+		 *	can perform the key-down.
+		 * \remarks		optional, if not in use set to default constructed value or '{}'
 		 */
-		ButtonDescription Button;
-
-		/**
-		 * \brief	The events/functions associated with different states.
-		 */
-		KeyStateBehaviors StateFunctions;
-
-		/**
-		 * \brief	Mutable last action performed, with get/set methods.
-		*/
-		MappingStateTracker LastAction;
-
-	public:
-		MappingContainer(
-			const ButtonDescription& buttonDescription,
-			const KeyStateBehaviors& stateFunctions,
-			std::optional<Nanos_t> beforeRepeatDelay = {},
-			std::optional<Nanos_t> betweenRepeatDelay = {})
-			:
-			Button(buttonDescription),
-			StateFunctions(stateFunctions)
-		{
-			if (beforeRepeatDelay)
-				LastAction.DelayBeforeFirstRepeat.Reset(beforeRepeatDelay.value());
-			if (betweenRepeatDelay)
-				LastAction.LastSentTime.Reset(betweenRepeatDelay.value());
-		}
-
-		MappingContainer(
-			ButtonDescription&& buttonDescription,
-			KeyStateBehaviors&& stateFunctions,
-			std::optional<Nanos_t> beforeRepeatDelay = {},
-			std::optional<Nanos_t> betweenRepeatDelay = {})
-			:
-			Button(std::move(buttonDescription)),
-			StateFunctions(std::move(stateFunctions))
-		{
-			if (beforeRepeatDelay)
-				LastAction.DelayBeforeFirstRepeat.Reset(beforeRepeatDelay.value());
-			if (betweenRepeatDelay)
-				LastAction.LastSentTime.Reset(betweenRepeatDelay.value());
-		}
+		std::optional<GrpVal_t> ExclusivityGrouping; // TODO one variation of ex. group behavior is to have a priority value associated with the mapping.
+		std::optional<Nanos_t> DelayBeforeFirstRepeat;
+		std::optional<Nanos_t> BetweenRepeatDelay;
 	};
 	static_assert(std::copyable<MappingContainer>);
 	static_assert(std::movable<MappingContainer>);
@@ -351,7 +255,7 @@ namespace sds
 	 *		design, it would be possible to, for instance, withhold calling the operation to perform, yet still have the mapping's state updating internally, erroneously.
 	 *		I believe this will make calling order-dependent functionality less error-prone.
 	 */
-	struct TranslationResult final
+	struct TranslationResult
 	{
 		// TODO test with std::unique_ptr to Fn_t, it currently is like 18k of stack space.
 		// Operation being requested to be performed, callable
@@ -377,7 +281,7 @@ namespace sds
 	 * \remarks		If using the provided call operator, it will prioritize key-up requests, then key-down requests, then repeat requests, then updates.
 	 *	I figure it should process key-ups and new key-downs with the highest priority, after that keys doing a repeat, and lastly updates.
 	 */
-	struct TranslationPack final
+	struct TranslationPack
 	{
 		void operator()() const
 		{
@@ -402,103 +306,119 @@ namespace sds
 	static_assert(std::copyable<TranslationPack>);
 	static_assert(std::movable<TranslationPack>);
 
+#pragma region Factory_Functions_For_Translator
+
 	// These are a few 'factory' functions, to create the appropriate TranslationResult for the next mapping state--they are tremendously useful.
-	[[nodiscard]] inline auto GetResetTranslationResult(MappingContainer& currentMapping) noexcept -> TranslationResult
+	[[nodiscard]] inline auto GetResetTranslationResult(const MappingContainer& currentMapping, MappingStateTracker& stateTracker) noexcept -> TranslationResult
 	{
 		return TranslationResult
 		{
-			.OperationToPerform = [&currentMapping]()
+			.OperationToPerform = [&]()
 			{
-				if (currentMapping.StateFunctions.OnReset)
-					currentMapping.StateFunctions.OnReset();
+				if (currentMapping.OnReset)
+					currentMapping.OnReset();
 			},
-			.AdvanceStateFn = [&currentMapping]()
+			.AdvanceStateFn = [&]()
 			{
-				currentMapping.LastAction.SetInitial();
-				currentMapping.LastAction.LastSentTime.Reset();
+				stateTracker.SetInitial();
+				stateTracker.LastSentTime.Reset();
 			},
-			.MappingVk = currentMapping.Button.ButtonVirtualKeycode,
-			.ExclusivityGrouping = currentMapping.Button.ExclusivityGrouping
+			.MappingVk = currentMapping.ButtonVirtualKeycode,
+			.ExclusivityGrouping = currentMapping.ExclusivityGrouping
 		};
 	}
 
-	[[nodiscard]] inline auto GetRepeatTranslationResult(MappingContainer& currentMapping) noexcept -> TranslationResult
+	[[nodiscard]] inline auto GetRepeatTranslationResult(const MappingContainer& currentMapping, MappingStateTracker& stateTracker) noexcept -> TranslationResult
 	{
 		return TranslationResult
 		{
-			.OperationToPerform = [&currentMapping]()
+			.OperationToPerform = [&]()
 			{
-				if (currentMapping.StateFunctions.OnRepeat)
-					currentMapping.StateFunctions.OnRepeat();
-				currentMapping.LastAction.LastSentTime.Reset();
+				if (currentMapping.OnRepeat)
+					currentMapping.OnRepeat();
+				stateTracker.LastSentTime.Reset();
 			},
-			.AdvanceStateFn = [&currentMapping]()
+			.AdvanceStateFn = [&]()
 			{
-				currentMapping.LastAction.SetRepeat();
+				stateTracker.SetRepeat();
 			},
-			.MappingVk = currentMapping.Button.ButtonVirtualKeycode,
-			.ExclusivityGrouping = currentMapping.Button.ExclusivityGrouping
+			.MappingVk = currentMapping.ButtonVirtualKeycode,
+			.ExclusivityGrouping = currentMapping.ExclusivityGrouping
 		};
 	}
 
-	[[nodiscard]] inline auto GetOvertakenTranslationResult(MappingContainer& overtakenMapping) noexcept -> TranslationResult
+	[[nodiscard]] inline auto GetOvertakenTranslationResult(const MappingContainer& overtakenMapping, MappingStateTracker& stateTracker) noexcept -> TranslationResult
 	{
 		return TranslationResult
 		{
-			.OperationToPerform = [&overtakenMapping]()
+			.OperationToPerform = [&]()
 			{
-				if (overtakenMapping.StateFunctions.OnUp)
-					overtakenMapping.StateFunctions.OnUp();
+				if (overtakenMapping.OnUp)
+					overtakenMapping.OnUp();
 			},
-			.AdvanceStateFn = [&overtakenMapping]()
+			.AdvanceStateFn = [&]()
 			{
-				overtakenMapping.LastAction.SetUp();
+				stateTracker.SetUp();
 			},
-			.MappingVk = overtakenMapping.Button.ButtonVirtualKeycode,
-			.ExclusivityGrouping = overtakenMapping.Button.ExclusivityGrouping
+			.MappingVk = overtakenMapping.ButtonVirtualKeycode,
+			.ExclusivityGrouping = overtakenMapping.ExclusivityGrouping
 		};
 	}
 
-	[[nodiscard]] inline auto GetKeyUpTranslationResult(MappingContainer& currentMapping) noexcept -> TranslationResult
+	[[nodiscard]] inline auto GetKeyUpTranslationResult(const MappingContainer& currentMapping, MappingStateTracker& stateTracker) noexcept -> TranslationResult
 	{
 		return TranslationResult
 		{
-			.OperationToPerform = [&currentMapping]()
+			.OperationToPerform = [&]()
 			{
-				if (currentMapping.StateFunctions.OnUp)
-					currentMapping.StateFunctions.OnUp();
+				if (currentMapping.OnUp)
+					currentMapping.OnUp();
 			},
-			.AdvanceStateFn = [&currentMapping]()
+			.AdvanceStateFn = [&]()
 			{
-				currentMapping.LastAction.SetUp();
+				stateTracker.SetUp();
 			},
-			.MappingVk = currentMapping.Button.ButtonVirtualKeycode,
-			.ExclusivityGrouping = currentMapping.Button.ExclusivityGrouping
+			.MappingVk = currentMapping.ButtonVirtualKeycode,
+			.ExclusivityGrouping = currentMapping.ExclusivityGrouping
 		};
 	}
 
-	[[nodiscard]] inline auto GetInitialKeyDownTranslationResult(MappingContainer& currentMapping) noexcept -> TranslationResult
+	[[nodiscard]] inline auto GetInitialKeyDownTranslationResult(const MappingContainer& currentMapping, MappingStateTracker& stateTracker) noexcept -> TranslationResult
 	{
 		return TranslationResult
 		{
-			.OperationToPerform = [&currentMapping]()
+			.OperationToPerform = [&]()
 			{
-				if (currentMapping.StateFunctions.OnDown)
-					currentMapping.StateFunctions.OnDown();
+				if (currentMapping.OnDown)
+					currentMapping.OnDown();
 				// Reset timer after activation, to wait for elapsed before another next state translation is returned.
-				currentMapping.LastAction.LastSentTime.Reset();
-				currentMapping.LastAction.DelayBeforeFirstRepeat.Reset();
+				stateTracker.LastSentTime.Reset();
+				stateTracker.DelayBeforeFirstRepeat.Reset();
 			},
-			.AdvanceStateFn = [&currentMapping]()
+			.AdvanceStateFn = [&]()
 			{
-				currentMapping.LastAction.SetDown();
+				stateTracker.SetDown();
 			},
-			.MappingVk = currentMapping.Button.ButtonVirtualKeycode,
-			.ExclusivityGrouping = currentMapping.Button.ExclusivityGrouping
+			.MappingVk = currentMapping.ButtonVirtualKeycode,
+			.ExclusivityGrouping = currentMapping.ExclusivityGrouping
 		};
 	}
 
+#pragma endregion
+
+#pragma region Algos_For_Translator
 	// Algorithm functions used by the translator.
+
+	[[nodiscard]] constexpr bool IsNotEnd(const std::ranges::range auto& theRange, const std::ranges::iterator_t<decltype(theRange)>& theIterator) noexcept
+	{
+		return theIterator != std::ranges::cend(theRange);
+	}
+
+	[[nodiscard]] constexpr bool IsEnd(const std::ranges::range auto& theRange, const std::ranges::iterator_t<decltype(theRange)>& theIterator) noexcept
+	{
+		return theIterator == std::ranges::cend(theRange);
+	}
+
 	/**
 	 * \brief For a single mapping, search the controller state update buffer and produce a TranslationResult appropriate to the current mapping state and controller state.
 	 * \param downKeys Wrapper class containing the results of a controller state update polling.
@@ -506,128 +426,103 @@ namespace sds
 	 * \returns Optional, <c>TranslationResult</c>
 	 */
 	template<typename Val_t>
-	[[nodiscard]] auto GetButtonTranslationForInitialToDown(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
+	[[nodiscard]] auto GetButtonTranslationForInitialToDown(const SmallVector_t<Val_t>& downKeys, const MappingContainer& singleButton, MappingStateTracker& stateTracker) noexcept -> std::optional<TranslationResult>
 	{
-		using std::ranges::find, std::ranges::end;
+		using std::ranges::find;
 
-		if (singleButton.LastAction.IsInitialState())
+		if (stateTracker.IsInitialState())
 		{
-			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
+			const auto findResult = find(downKeys, singleButton.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the down translation.
-			if (findResult != end(downKeys))
-				return GetInitialKeyDownTranslationResult(singleButton);
+			if (IsNotEnd(downKeys, findResult))
+				return std::make_optional<TranslationResult>(GetInitialKeyDownTranslationResult(singleButton, stateTracker));
 		}
 		return {};
 	}
 
 	template<typename Val_t>
-	[[nodiscard]] auto GetButtonTranslationForDownToRepeat(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
+	[[nodiscard]] auto GetButtonTranslationForDownToRepeat(const SmallVector_t<Val_t>& downKeys, const MappingContainer& singleButton, MappingStateTracker& stateTracker) noexcept -> std::optional<TranslationResult>
 	{
-		using std::ranges::find, std::ranges::end;
-		const bool isDownAndUsesRepeat = singleButton.LastAction.IsDown() &&
-			(singleButton.Button.RepeatingKeyBehavior == RepeatType::Infinite || singleButton.Button.RepeatingKeyBehavior == RepeatType::FirstOnly);
-		const bool isDelayElapsed = singleButton.LastAction.DelayBeforeFirstRepeat.IsElapsed();
+		using std::ranges::find;
+
+		const bool isDownAndUsesRepeat =
+			stateTracker.IsDown()
+			&& (singleButton.RepeatingKeyBehavior == RepeatType::Infinite
+				|| singleButton.RepeatingKeyBehavior == RepeatType::FirstOnly);
+
+		const bool isDelayElapsed = stateTracker.DelayBeforeFirstRepeat.IsElapsed();
+
 		if (isDownAndUsesRepeat && isDelayElapsed)
 		{
-			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
+			const auto findResult = find(downKeys, singleButton.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the repeat translation.
-			if (findResult != end(downKeys))
-				return GetRepeatTranslationResult(singleButton);
+			if (IsNotEnd(downKeys, findResult))
+				return std::make_optional<TranslationResult>(GetRepeatTranslationResult(singleButton, stateTracker));
 		}
 		return {};
 	}
 
 	template<typename Val_t>
-	[[nodiscard]] auto GetButtonTranslationForRepeatToRepeat(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
+	[[nodiscard]] auto GetButtonTranslationForRepeatToRepeat(const SmallVector_t<Val_t>& downKeys, const MappingContainer& singleButton, MappingStateTracker& stateTracker) noexcept -> std::optional<TranslationResult>
 	{
-		using std::ranges::find, std::ranges::end;
-		const bool isRepeatAndUsesInfinite = singleButton.LastAction.IsRepeating() && singleButton.Button.RepeatingKeyBehavior == RepeatType::Infinite;
-		if (isRepeatAndUsesInfinite && singleButton.LastAction.LastSentTime.IsElapsed())
+		using std::ranges::find;
+
+		const bool isRepeatAndUsesInfinite = stateTracker.IsRepeating() && singleButton.RepeatingKeyBehavior == RepeatType::Infinite;
+		if (isRepeatAndUsesInfinite && stateTracker.LastSentTime.IsElapsed())
 		{
-			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
+			const auto findResult = find(downKeys, singleButton.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the repeat translation.
-			if (findResult != end(downKeys))
-				return GetRepeatTranslationResult(singleButton);
+			if (IsNotEnd(downKeys, findResult))
+				return std::make_optional<TranslationResult>(GetRepeatTranslationResult(singleButton, stateTracker));
 		}
 		return {};
 	}
 
 	template<typename Val_t>
-	[[nodiscard]] auto GetButtonTranslationForDownOrRepeatToUp(const SmallVector_t<Val_t>& downKeys, MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
+	[[nodiscard]] auto GetButtonTranslationForDownOrRepeatToUp(const SmallVector_t<Val_t>& downKeys, const MappingContainer& singleButton, MappingStateTracker& stateTracker) noexcept -> std::optional<TranslationResult>
 	{
-		using std::ranges::find, std::ranges::end;
-		if (singleButton.LastAction.IsDown() || singleButton.LastAction.IsRepeating())
+		using std::ranges::find;
+
+		if (stateTracker.IsDown() || stateTracker.IsRepeating())
 		{
-			const auto findResult = find(downKeys, singleButton.Button.ButtonVirtualKeycode);
+			const auto findResult = find(downKeys, singleButton.ButtonVirtualKeycode);
 			// If VK is not found in the down list, create the up translation.
-			if (findResult == end(downKeys))
-				return GetKeyUpTranslationResult(singleButton);
+			if (IsEnd(downKeys, findResult))
+				return std::make_optional<TranslationResult>(GetKeyUpTranslationResult(singleButton, stateTracker));
 		}
 		return {};
 	}
 
 	// This is the reset translation
-	[[nodiscard]] inline auto GetButtonTranslationForUpToInitial(MappingContainer& singleButton) noexcept -> std::optional<TranslationResult>
+	[[nodiscard]] inline auto GetButtonTranslationForUpToInitial(const MappingContainer& singleButton, MappingStateTracker& stateTracker) noexcept -> std::optional<TranslationResult>
 	{
 		// if the timer has elapsed, update back to the initial state.
-		if (singleButton.LastAction.IsUp() && singleButton.LastAction.LastSentTime.IsElapsed())
+		if (stateTracker.IsUp() && stateTracker.LastSentTime.IsElapsed())
 		{
-			return GetResetTranslationResult(singleButton);
+			return std::make_optional<TranslationResult>(GetResetTranslationResult(singleButton, stateTracker));
 		}
 		return {};
 	}
 
 	/**
-	* \brief Returns the indices at which a mapping that matches the 'vk' was found. PRECONDITION: A mapping with the specified VK does exist in the mappingsRange!
+	* \brief  Optionally returns the indices at which a mapping that matches the 'vk' was found.
 	* \param vk Virtual keycode of the presumably 'down' key with which to match MappingContainer mappings.
-	* \param mappingsRange The range of MappingContainer mappings for which to return the indices of matching mappings.
+	* \param mappingsRange The range of MappingContainer mappings for which to return the index of a matching mapping.
 	*/
-	[[nodiscard]] auto GetMappingIndexForVk(const NotBoolIntegral_c auto vk, const std::span<const MappingContainer> mappingsRange) -> std::optional<Index_t>
+	[[nodiscard]] inline auto GetMappingIndexForVk(const NotBoolIntegral_c auto vk, const std::span<const MappingContainer> mappingsRange) noexcept -> std::optional<Index_t>
 	{
 		using std::ranges::find_if;
-		using std::ranges::cend;
-		using std::ranges::cbegin;
-		using std::ranges::distance;
 
-		const auto findResult = find_if(mappingsRange, [vk](const auto e) { return e.Button.ButtonVirtualKeycode == vk; });
-		const bool didFindResult = findResult != cend(mappingsRange);
+		const auto findResult = find_if(mappingsRange, [vk](const auto& e) { return e.ButtonVirtualKeycode == static_cast<decltype(e.ButtonVirtualKeycode)>(vk); });
+		const bool didFindResult = IsNotEnd(mappingsRange, findResult);
 
-		if (!didFindResult)
-		{
-			throw std::runtime_error(
-				std::vformat("Did not find mapping with vk: {} in mappings range.\nLocation:\n{}\n\n",
-					std::make_format_args(static_cast<int>(vk), std::source_location::current().function_name())));
-		}
-
-		return static_cast<Index_t>(distance(cbegin(mappingsRange), findResult));
-	}
-
-	/**
-	* \brief Returns the iterator at which a mapping that matches the 'vk' was found.
-	* \param vk Virtual keycode of the presumably 'down' key with which to match MappingContainer mappings.
-	* \param mappingsRange The range of MappingContainer mappings for which to return the indices of matching mappings.
-	*/
-	[[nodiscard]] auto GetMappingByVk(const NotBoolIntegral_c auto vk, std::span<const MappingContainer> mappingsRange) -> std::optional<std::span<const MappingContainer>::iterator>
-	{
-		using std::ranges::find_if;
-		using std::ranges::cend;
-		using std::ranges::cbegin;
-		using std::ranges::distance;
-
-		const auto findResult = find_if(mappingsRange, [vk](const auto e) { return e.Button.ButtonVirtualKeycode == vk; });
-		const bool didFindResult = findResult != cend(mappingsRange);
-
+		[[unlikely]]
 		if (!didFindResult)
 		{
 			return {};
 		}
 
-		return findResult;
-	}
-
-	[[nodiscard]] constexpr auto IsVkInStateUpdate(const NotBoolIntegral_c auto vkToFind, const std::span<const int32_t> downVirtualKeys) noexcept -> bool
-	{
-		return std::ranges::any_of(downVirtualKeys, [vkToFind](const auto vk) { return vk == vkToFind; });
+		return std::make_optional<Index_t>(static_cast<Index_t>(std::distance(mappingsRange.cbegin(), findResult)));
 	}
 
 	[[nodiscard]] constexpr auto IsMappingInRange(const NotBoolIntegral_c auto vkToFind, const std::ranges::range auto& downVirtualKeys) noexcept -> bool
@@ -635,14 +530,10 @@ namespace sds
 		return std::ranges::any_of(downVirtualKeys, [vkToFind](const auto vk) { return vk == vkToFind; });
 	}
 
-	constexpr void EraseValuesFromRange(std::ranges::range auto& theRange, const std::ranges::range auto& theValues) noexcept
+	constexpr auto GetErasedRange(const std::ranges::range auto& theRange, const std::ranges::range auto& theValues) noexcept -> std::vector<int32_t>
 	{
-		for (const auto& elem : theValues)
-		{
-			const auto foundPosition = std::ranges::find(theRange, elem);
-			if (foundPosition != std::ranges::cend(theRange))
-				theRange.erase(foundPosition);
-		}
+		auto copied = theRange | std::views::filter([&](const auto& elem) { return !IsMappingInRange(elem, theValues); });
+		return { std::ranges::begin(copied), std::ranges::end(copied) };
 	}
 
 	/**
@@ -655,11 +546,11 @@ namespace sds
 		SmallFlatMap_t<int32_t, bool> mappingTable;
 		for (const auto& e : mappingsList)
 		{
-			if (mappingTable[e.Button.ButtonVirtualKeycode])
+			if (mappingTable[e.ButtonVirtualKeycode])
 			{
 				return false;
 			}
-			mappingTable[e.Button.ButtonVirtualKeycode] = true;
+			mappingTable[e.ButtonVirtualKeycode] = true;
 		}
 		return true;
 	}
@@ -671,7 +562,7 @@ namespace sds
 	 */
 	[[nodiscard]] inline bool AreMappingVksNonZero(const std::span<const MappingContainer> mappingsList) noexcept
 	{
-		return !std::ranges::any_of(mappingsList, [](const auto vk) { return vk.ButtonVirtualKeycode == 0; }, &MappingContainer::Button);
+		return !std::ranges::any_of(mappingsList, [](const auto vk) { return vk == 0; }, &MappingContainer::ButtonVirtualKeycode);
 	}
 
 	/**
@@ -684,6 +575,8 @@ namespace sds
 		return mapping.IsDown() || mapping.IsRepeating();
 	}
 
+#pragma endregion Algos_For_Translator
+
 	/**
 	 * \brief Encapsulates the mapping buffer, processes controller state updates, returns translation packs.
 	 * \remarks If, before destruction, the mappings are in a state other than initial or awaiting reset, then you may wish to
@@ -691,13 +584,14 @@ namespace sds
 	 *	<p></p>
 	 *	<p>An invariant exists such that: <b>There must be only one mapping per virtual keycode.</b></p>
 	 */
-	class Translator final
+	class Translator
 	{
 		using MappingVector_t = SmallVector_t<MappingContainer>;
+		using MappingStateVector_t = SmallVector_t<MappingStateTracker>;
 		static_assert(MappingRange_c<MappingVector_t>);
 
-		MappingVector_t m_mappings;
-
+		std::shared_ptr<MappingVector_t> m_mappings;
+		MappingStateVector_t m_mappingStates;
 	public:
 		Translator() = delete; // no default
 		Translator(const Translator& other) = delete; // no copy
@@ -712,41 +606,52 @@ namespace sds
 		 * \param keyMappings mapping vector type
 		 * \exception std::runtime_error on exclusivity group error during construction, OR more than one mapping per VK.
 		 */
-		explicit Translator(MappingVector_t&& keyMappings)
-			: m_mappings(std::move(keyMappings))
+		explicit Translator(MappingRange_c auto&& keyMappings)
+			: m_mappings(std::make_shared<MappingVector_t>(std::move(keyMappings)))
 		{
-			if (!AreMappingsUniquePerVk(m_mappings) || !AreMappingVksNonZero(m_mappings))
+			if (!AreMappingsUniquePerVk(*m_mappings) || !AreMappingVksNonZero(*m_mappings))
 				throw std::runtime_error("Exception: More than 1 mapping per VK!");
+			
+			m_mappingStates.resize(m_mappings->size());
+			// Zip returns a tuple of refs to the types.
+			for (auto zipped : std::views::zip(*m_mappings, m_mappingStates))
+			{
+				const auto& mapping = std::get<0>(zipped);
+				auto& mappingState = std::get<1>(zipped);
+				mappingState.DelayBeforeFirstRepeat.Reset(mapping.DelayBeforeFirstRepeat.value_or(DelayTimer::DefaultKeyRepeatDelay));
+				mappingState.LastSentTime.Reset(mapping.BetweenRepeatDelay.value_or(DelayTimer::DefaultKeyRepeatDelay));
+			}
 		}
 	public:
-		[[nodiscard]] auto operator()(SmallVector_t<int32_t> stateUpdate) noexcept -> TranslationPack
+		[[nodiscard]] auto operator()(const SmallVector_t<int32_t>& stateUpdate) noexcept -> TranslationPack
 		{
-			return GetUpdatedState(std::move(stateUpdate));
+			return GetUpdatedState(stateUpdate);
 		}
 
-		[[nodiscard]] auto GetUpdatedState(SmallVector_t<int32_t>&& stateUpdate) noexcept -> TranslationPack
+		[[nodiscard]] auto GetUpdatedState(const SmallVector_t<int32_t>& stateUpdate) noexcept -> TranslationPack
 		{
 			TranslationPack translations;
-			for (auto& mapping : m_mappings)
+			for (auto elem : std::views::zip(*m_mappings, m_mappingStates))
 			{
-				if (const auto upToInitial = GetButtonTranslationForUpToInitial(mapping))
+				auto& [mapping, mappingState] = elem;
+				if (const auto upToInitial = GetButtonTranslationForUpToInitial(mapping, mappingState))
 				{
 					translations.UpdateRequests.push_back(*upToInitial);
 				}
-				else if (const auto initialToDown = GetButtonTranslationForInitialToDown(stateUpdate, mapping))
+				else if (const auto initialToDown = GetButtonTranslationForInitialToDown(stateUpdate, mapping, mappingState))
 				{
 					// Advance to next state.
 					translations.DownRequests.push_back(*initialToDown);
 				}
-				else if (const auto downToFirstRepeat = GetButtonTranslationForDownToRepeat(stateUpdate, mapping))
+				else if (const auto downToFirstRepeat = GetButtonTranslationForDownToRepeat(stateUpdate, mapping, mappingState))
 				{
 					translations.RepeatRequests.push_back(*downToFirstRepeat);
 				}
-				else if (const auto repeatToRepeat = GetButtonTranslationForRepeatToRepeat(stateUpdate, mapping))
+				else if (const auto repeatToRepeat = GetButtonTranslationForRepeatToRepeat(stateUpdate, mapping, mappingState))
 				{
 					translations.RepeatRequests.push_back(*repeatToRepeat);
 				}
-				else if (const auto repeatToUp = GetButtonTranslationForDownOrRepeatToUp(stateUpdate, mapping))
+				else if (const auto repeatToUp = GetButtonTranslationForDownOrRepeatToUp(stateUpdate, mapping, mappingState))
 				{
 					translations.UpRequests.push_back(*repeatToUp);
 				}
@@ -757,17 +662,18 @@ namespace sds
 		[[nodiscard]] auto GetCleanupActions() noexcept -> SmallVector_t<TranslationResult>
 		{
 			SmallVector_t<TranslationResult> translations;
-			for (auto& mapping : m_mappings)
+			for (auto elem : std::views::zip(*m_mappings, m_mappingStates))
 			{
-				if (DoesMappingNeedCleanup(mapping.LastAction))
+				auto& [mapping, mappingState] = elem;
+				if (DoesMappingNeedCleanup(mappingState))
 				{
-					translations.push_back(GetKeyUpTranslationResult(mapping));
+					translations.push_back(GetKeyUpTranslationResult(mapping, mappingState));
 				}
 			}
 			return translations;
 		}
 
-		[[nodiscard]] auto GetMappingsRange() const -> const MappingVector_t&
+		[[nodiscard]] auto GetMappingsRange() const noexcept -> std::shared_ptr<MappingVector_t>
 		{
 			return m_mappings;
 		}
@@ -783,7 +689,7 @@ namespace sds
 	 * \remarks This abstraction manages the currently activated key being "overtaken" by another key from the same group and causing a key-up/down to be sent for the currently activated,
 	 *	as well as moving the key in line behind the newly activated key. A much needed abstraction.
 	 */
-	class GroupActivationInfo final
+	class GroupActivationInfo
 	{
 		using Elem_t = int32_t;
 
@@ -809,7 +715,7 @@ namespace sds
 			{
 				const auto currentDownValue = ActivatedValuesQueue.front();
 				ActivatedValuesQueue.push_front(newDownVk);
-				return std::make_pair(false, currentDownValue);
+				return std::make_pair(false, std::make_optional<Elem_t>(currentDownValue));
 			}
 
 			// New activated mapping case, add to queue in first position and don't filter. No key-up required.
@@ -838,12 +744,12 @@ namespace sds
 				// Case wherein the currently activated mapping is the one getting a key-up.
 				if (isInFirstPosition)
 				{
-					if (ActivatedValuesQueue.size() > 1)
+					if (!ActivatedValuesQueue.empty())
 					{
 						// If there is an overtaken queue, key-down the next key in line.
 						ActivatedValuesQueue.pop_front();
 						// Return the new front hash to be sent a key-down.
-						return ActivatedValuesQueue.front();
+						return !ActivatedValuesQueue.empty() ? std::make_optional<Elem_t>(ActivatedValuesQueue.front()) : std::optional<Elem_t>{};
 					}
 				}
 
@@ -871,7 +777,8 @@ namespace sds
 			const bool isFound = findResult != std::ranges::cend(ActivatedValuesQueue);
 			return !isCurrentActivation && isFound;
 		}
-		[[nodiscard]] bool IsAnyMappingActivated() const noexcept {
+		[[nodiscard]] bool IsAnyMappingActivated() const noexcept 
+		{
 			return !ActivatedValuesQueue.empty();
 		}
 		[[nodiscard]] bool IsMappingActivatedOrOvertaken(const Elem_t vk) const noexcept
@@ -895,38 +802,47 @@ namespace sds
 	 *	it will only process a single overtaking key-down at a time, and will suppress the rest in the state update to be handled on the next iteration.
 	 */
 	template<typename GroupInfo_t = GroupActivationInfo>
-	class OvertakingFilter final
+	class OvertakingFilter
 	{
-		using VirtualCode_t = int32_t;
+		using VirtualCode_t = int32_t; 
 
-		// Mapping of exclusivity grouping value to 
-		using MapType_t = std::map<GrpVal_t, GroupInfo_t>;
-
-		// span to mappings
-		std::span<const MappingContainer> m_mappings;
+		std::set<VirtualCode_t> m_allVirtualKeycodes; // Order does not match mappings
+		// const ptr to mappings
+		std::shared_ptr<const SmallVector_t<MappingContainer>> m_mappings;
 
 		// map of grouping value to GroupActivationInfo container.
-		MapType_t m_groupMap;
+		std::map<GrpVal_t, GroupInfo_t> m_groupMap;
+		// Mapping of grouping value to mapping indices.
+		std::map<GrpVal_t, std::set<VirtualCode_t>> m_groupToVkMap;
+		
+		std::map<int32_t, Index_t> m_vkToIndexMap;
 	public:
-		OvertakingFilter() = delete;
+		OvertakingFilter() noexcept = delete;
 
-		explicit OvertakingFilter(const InputTranslator_c auto& translator)
+		explicit OvertakingFilter(const InputTranslator_c auto& translator) noexcept
 		{
-			SetMappingRange(translator.GetMappingsRange());
+			auto pMappings = translator.GetMappingsRange();
+
+			SetMappingRange(pMappings);
 		}
 
 		// This function is used to filter the controller state updates before they are sent to the translator.
 		// It will have an effect on overtaking behavior by modifying the state update buffer, which just contains the virtual keycodes that are reported as down.
-		[[nodiscard]] auto GetFilteredButtonState(SmallVector_t<VirtualCode_t>&& stateUpdate) -> SmallVector_t<VirtualCode_t>
+		[[nodiscard]] auto GetFilteredButtonState(const SmallVector_t<VirtualCode_t>& stateUpdate) noexcept -> SmallVector_t<VirtualCode_t>
 		{
 			using std::ranges::sort;
+			using std::views::filter;
 
 			// Sorting provides an ordering to which down states with an already handled exclusivity grouping get filtered out for this iteration.
 			//sort(stateUpdate, std::ranges::less{}); // TODO <-- problem for the (current) unit testing, optional anyway
 
-			stateUpdate = FilterStateUpdateForUniqueExclusivityGroups(std::move(stateUpdate));
+			// Filters out VKs that don't have any corresponding mapping.
+			auto filteredUpdateView = stateUpdate | filter([this](const auto vk) { return m_allVirtualKeycodes.contains(vk); });
+			const std::vector<int32_t> filteredStateUpdate = { filteredUpdateView.cbegin(), filteredUpdateView.cend() };
 
-			auto filteredForDown = FilterDownTranslation(stateUpdate);
+			const auto uniqueGrouped = GetNonUniqueGroupElements(filteredStateUpdate);
+
+			const auto filteredForDown = FilterDownTranslation(uniqueGrouped);
 
 			// There appears to be no reason to report additional VKs that will become 'down' after a key is moved to up,
 			// because for the key to still be in the overtaken queue, it would need to still be 'down' as well, and thus handled
@@ -936,66 +852,80 @@ namespace sds
 			return filteredForDown;
 		}
 
-		auto operator()(SmallVector_t<VirtualCode_t> stateUpdate) -> SmallVector_t<VirtualCode_t>
+		auto operator()(const SmallVector_t<VirtualCode_t>& stateUpdate) noexcept -> SmallVector_t<VirtualCode_t>
 		{
-			return GetFilteredButtonState(std::move(stateUpdate));
+			return GetFilteredButtonState(stateUpdate);
 		}
 	private:
 
-		void SetMappingRange(const std::span<const MappingContainer> mappingsList)
+		void SetMappingRange(const std::shared_ptr<const SmallVector_t<MappingContainer>>& mappingsList) noexcept
 		{
 			m_mappings = mappingsList;
+			m_allVirtualKeycodes = {};
 			m_groupMap = {};
+			m_groupToVkMap = {};
+			m_vkToIndexMap = {};
 
-			// Build the map of ex. group information.
-			for (const auto& elem : mappingsList)
+			BuildAllMemos(m_mappings);
+		}
+
+		// A somewhat important bit of memoization/pre-processing.
+		void BuildAllMemos(const std::shared_ptr<const SmallVector_t<MappingContainer>>& mappingsList) noexcept
+		{
+			using std::views::enumerate;
+
+			for (const auto& [index, elem] : enumerate(*mappingsList))
 			{
-				if (elem.Button.ExclusivityGrouping)
+				// all vk set
+				m_allVirtualKeycodes.insert(elem.ButtonVirtualKeycode);
+				m_vkToIndexMap[elem.ButtonVirtualKeycode] = static_cast<Index_t>(index);
+
+				if (elem.ExclusivityGrouping)
 				{
-					const auto grpVal = *elem.Button.ExclusivityGrouping;
-					m_groupMap[grpVal] = {};
+					// group to group info map
+					m_groupMap[elem.ExclusivityGrouping.value()] = {};
+					// group to vk map
+					m_groupToVkMap[elem.ExclusivityGrouping.value()].insert(elem.ButtonVirtualKeycode);
 				}
 			}
 		}
 
-		[[nodiscard]] auto FilterDownTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate) -> SmallVector_t<VirtualCode_t>
+		[[nodiscard]] auto FilterDownTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate) noexcept -> SmallVector_t<VirtualCode_t>
 		{
-			using std::ranges::find;
-			using std::ranges::cend;
-			using std::ranges::views::transform;
-			using std::ranges::views::filter;
-			using std::erase;
+			using std::views::filter;
+			using std::views::transform;
+
+			const auto vkToMappingIndex = [&](const auto vk) -> std::optional<Index_t>
+				{
+					using std::ranges::find_if;
+					if (m_allVirtualKeycodes.contains(vk))
+					{
+						return m_vkToIndexMap[vk];
+					}
+					return {};
+				};
+			const auto optWithValueAndGroup = [&](const auto opt) -> bool
+				{
+					return opt.has_value() && GetMappingAt(*opt).ExclusivityGrouping.has_value();
+				};
+			const auto removeOpt = [&](const auto opt)
+				{
+					return opt.value();
+				};
 
 			auto stateUpdateCopy = stateUpdate;
-
-			// filters for all mappings of interest per the current 'down' VK buffer.
-			const auto vkHasMappingPred = [this](const auto vk) -> bool
-				{
-					const auto findResult = GetMappingByVk(vk, m_mappings);
-					return findResult.has_value();
-				};
-			const auto exGroupPred = [this](const auto ind) -> bool
-				{
-					return GetMappingAt(ind).Button.ExclusivityGrouping.has_value();
-				};
-			const auto mappingIndexPred = [this](const auto vk) -> std::size_t
-				{
-					auto findResult = GetMappingIndexForVk(vk, m_mappings);
-					assert(findResult.has_value());
-					return *findResult;
-				};
-
 			SmallVector_t<VirtualCode_t> vksToRemoveRange;
-
-			for (const auto index : stateUpdateCopy | filter(vkHasMappingPred) | transform(mappingIndexPred) | filter(exGroupPred))
+			// This appeared (at this time) to be the best option: 
+			// input vk List -> xform to mapping index list -> filter results to only include non-empty optional and ex. group -> xform to remove the optional = index list of mappings in the state update that have an ex. group.
+			for (const auto& mappingIndex : stateUpdateCopy | transform(vkToMappingIndex) | filter(optWithValueAndGroup) | transform(removeOpt))
 			{
-				const auto& currentMapping = GetMappingAt(index);
-				auto& currentGroup = m_groupMap[*currentMapping.Button.ExclusivityGrouping];
+				auto& currentMapping = GetMappingAt(mappingIndex);
+				auto& currentGroup = m_groupMap[*currentMapping.ExclusivityGrouping];
 
-				const auto& [shouldFilter, upOpt] = currentGroup.UpdateForNewMatchingGroupingDown(currentMapping.Button.ButtonVirtualKeycode);
+				const auto& [shouldFilter, upOpt] = currentGroup.UpdateForNewMatchingGroupingDown(currentMapping.ButtonVirtualKeycode);
 				if (shouldFilter)
 				{
-					vksToRemoveRange.push_back(currentMapping.Button.ButtonVirtualKeycode);
+					vksToRemoveRange.push_back(currentMapping.ButtonVirtualKeycode);
 				}
 				if (upOpt)
 				{
@@ -1003,49 +933,45 @@ namespace sds
 				}
 			}
 
-			EraseValuesFromRange(stateUpdateCopy, vksToRemoveRange);
-
-			return stateUpdateCopy;
+			return GetErasedRange(stateUpdateCopy, vksToRemoveRange);
 		}
 
 		// it will process only one key per ex. group per iteration. The others will be filtered out and handled on the next iteration.
-		void FilterUpTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate)
+		void FilterUpTranslation(const SmallVector_t<VirtualCode_t>& stateUpdate) noexcept
 		{
-			using std::ranges::views::filter;
-
+			using std::views::filter;
 			// filters for all mappings of interest per the current 'down' VK buffer (the UP mappings in this case).
-			const auto exGroupPred = [](const auto& currentMapping)
+			const auto exGroupAndNotInUpdatePred = [&](const auto& currentMapping)
 				{
-					return currentMapping.Button.ExclusivityGrouping.has_value();
-				};
-			const auto stateUpdateUpPred = [&stateUpdate](const auto& currentMapping)
-				{
-					return !IsMappingInRange(currentMapping.Button.ButtonVirtualKeycode, stateUpdate);
+					const bool hasValue = currentMapping.ExclusivityGrouping.has_value();
+					const bool notInUpdate = !IsMappingInRange(currentMapping.ButtonVirtualKeycode, stateUpdate);
+					return hasValue && notInUpdate;
 				};
 
-			for (const auto& currentMapping : m_mappings | filter(exGroupPred) | filter(stateUpdateUpPred))
+			for (const auto& currentMapping : (*m_mappings) | filter(exGroupAndNotInUpdatePred))
 			{
-				auto& currentGroup = m_groupMap[*currentMapping.Button.ExclusivityGrouping];
-				currentGroup.UpdateForNewMatchingGroupingUp(currentMapping.Button.ButtonVirtualKeycode);
+				auto& currentGroup = m_groupMap[*currentMapping.ExclusivityGrouping];
+				currentGroup.UpdateForNewMatchingGroupingUp(currentMapping.ButtonVirtualKeycode);
 			}
 		}
 
 	private:
-		[[nodiscard]] constexpr auto GetMappingAt(const std::size_t index) noexcept -> const MappingContainer&
+		[[nodiscard]] constexpr auto GetMappingAt(const NotBoolIntegral_c auto index) noexcept -> const MappingContainer&
 		{
-			return m_mappings[index];
+			return m_mappings->at(static_cast<Index_t>(index));
 		}
 
-		/**
-		 * \brief Used to remove VKs with an exclusivity grouping that another state update VK already has. Processed from begin to end, so the first processed VK will be the left-most and
-		 *	duplicates to the right will be removed.
-		 * \remarks This is essential because processing more than one exclusivity grouping having mapping in a single iteration of a filter will mean the first ex. group vks were not actually processed
-		 *	by the translator, yet their state would be updated by the filter incorrectly. Also, VKs in the state update must be unique! One VK per mapping is a hard precondition.
-		 * \return "filtered" state update.
-		 */
-		[[nodiscard]] auto FilterStateUpdateForUniqueExclusivityGroups(SmallVector_t<VirtualCode_t>&& stateUpdate) -> SmallVector_t<VirtualCode_t>
+		[[nodiscard]] constexpr auto GetMappingForVk(const NotBoolIntegral_c auto vk) noexcept -> const MappingContainer&
 		{
-			using std::ranges::find_if, std::ranges::cend, std::ranges::find;
+			auto ind = GetMappingIndexForVk(vk, *m_mappings);
+			assert(ind.has_value());
+			return GetMappingAt(*ind);
+		}
+
+		// Pre: VKs in state update do have a mapping.
+		[[nodiscard]] auto GetNonUniqueGroupElements(const SmallVector_t<int32_t>& stateUpdate) noexcept -> SmallVector_t<int32_t>
+		{
+			using std::ranges::find, std::ranges::cend;
 			using StateRange_t = std::remove_cvref_t<decltype(stateUpdate)>;
 
 			SmallVector_t<GrpVal_t> groupingValueBuffer;
@@ -1055,38 +981,30 @@ namespace sds
 
 			for (const auto vk : stateUpdate)
 			{
-				const auto foundMappingForVk = find_if(m_mappings, [vk](const auto& e)
-					{
-						return e.Button.ButtonVirtualKeycode == vk;
-					});
-				if (foundMappingForVk != cend(m_mappings))
-				{
-					if (foundMappingForVk->Button.ExclusivityGrouping)
-					{
-						const auto grpVal = foundMappingForVk->Button.ExclusivityGrouping.value();
-						auto& currentGroup = m_groupMap[grpVal];
-						if (!currentGroup.IsMappingActivatedOrOvertaken(vk))
-						{
-							const auto groupingFindResult = find(groupingValueBuffer, grpVal);
+				const auto mappingIndex = m_vkToIndexMap[vk];
+				const auto& foundMappingForVk = GetMappingAt(mappingIndex);
 
-							// If already in located, being handled groupings, add to remove buffer.
-							if (groupingFindResult != cend(groupingValueBuffer))
-								virtualKeycodesToRemove.push_back(vk);
-							// Otherwise, add this new grouping to the grouping value buffer.
-							else
-								groupingValueBuffer.push_back(grpVal);
-						}
+				if (foundMappingForVk.ExclusivityGrouping)
+				{
+					const auto grpVal = foundMappingForVk.ExclusivityGrouping.value();
+					auto& currentGroup = m_groupMap[grpVal];
+					if (!currentGroup.IsMappingActivatedOrOvertaken(vk))
+					{
+						const auto groupingFindResult = find(groupingValueBuffer, grpVal);
+
+						// If already in located, being handled groupings, add to remove buffer.
+						if (groupingFindResult != cend(groupingValueBuffer))
+							virtualKeycodesToRemove.emplace_back(vk);
+						// Otherwise, add this new grouping to the grouping value buffer.
+						else
+							groupingValueBuffer.emplace_back(grpVal);
 					}
 				}
 			}
-
-			EraseValuesFromRange(stateUpdate, virtualKeycodesToRemove);
-
-			return stateUpdate;
+			
+			return GetErasedRange(stateUpdate, virtualKeycodesToRemove);
 		}
 	};
 	static_assert(std::copyable<OvertakingFilter<>>);
 	static_assert(std::movable<OvertakingFilter<>>);
-	//static_assert(ValidFilterType_c<OvertakingFilter<>> == true);
-
 }

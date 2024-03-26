@@ -38,7 +38,7 @@ auto RunTestLoop(auto& translator, auto& filter, auto dataSet, const size_t Data
 	// Run test data set
 	for (auto data : dataSet)
 	{
-		translator(filter(std::move(data)))();
+		translator(filter(data))();
 	}
 
 	// Compute times
