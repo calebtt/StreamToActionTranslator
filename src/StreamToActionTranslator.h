@@ -157,26 +157,15 @@ namespace sds
 		}
 	};
 
-	///**
-	// * \brief	Functions called when a state change occurs.
-	// */
-	//struct KeyStateBehaviors
-	//{
-	//	Fn_t OnDown; // Key-down
-	//	Fn_t OnUp; // Key-up
-	//	Fn_t OnRepeat; // Key-repeat
-	//	Fn_t OnReset; // Reset after key-up and prior to another key-down can be performed
-	//};
-	//static_assert(std::copyable<KeyStateBehaviors>);
-	//static_assert(std::movable<KeyStateBehaviors>);
-
 	/**
 	 * \brief	Wrapper for button to action mapping state enum, the least I can do is make sure state modifications occur through a managing class,
 	 *		and that there exists only one 'current' state, and that it can only be a finite set of possibilities.
 	 *		Also contains last sent time (for key-repeat), and delay before first key-repeat timer.
 	 * \remarks	This class enforces an invariant that it's state cannot be altered out of sequence.
 	 */
-	class MappingStateTracker
+	class 
+		//alignas(std::hardware_constructive_interference_size) 
+		MappingStateTracker
 	{
 		/**
 		 * \brief Key Repeat Delay is the time delay a button has in-between activations.
@@ -446,7 +435,7 @@ namespace sds
 			const auto findResult = find(downKeys, singleButton.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the down translation.
 			if (IsNotEnd(downKeys, findResult))
-				return GetInitialKeyDownTranslationResult(singleButton, stateTracker);
+				return std::make_optional<TranslationResult>(GetInitialKeyDownTranslationResult(singleButton, stateTracker));
 		}
 		return {};
 	}
@@ -468,7 +457,7 @@ namespace sds
 			const auto findResult = find(downKeys, singleButton.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the repeat translation.
 			if (IsNotEnd(downKeys, findResult))
-				return GetRepeatTranslationResult(singleButton, stateTracker);
+				return std::make_optional<TranslationResult>(GetRepeatTranslationResult(singleButton, stateTracker));
 		}
 		return {};
 	}
@@ -484,7 +473,7 @@ namespace sds
 			const auto findResult = find(downKeys, singleButton.ButtonVirtualKeycode);
 			// If VK *is* found in the down list, create the repeat translation.
 			if (IsNotEnd(downKeys, findResult))
-				return GetRepeatTranslationResult(singleButton, stateTracker);
+				return std::make_optional<TranslationResult>(GetRepeatTranslationResult(singleButton, stateTracker));
 		}
 		return {};
 	}
@@ -499,7 +488,7 @@ namespace sds
 			const auto findResult = find(downKeys, singleButton.ButtonVirtualKeycode);
 			// If VK is not found in the down list, create the up translation.
 			if (IsEnd(downKeys, findResult))
-				return GetKeyUpTranslationResult(singleButton, stateTracker);
+				return std::make_optional<TranslationResult>(GetKeyUpTranslationResult(singleButton, stateTracker));
 		}
 		return {};
 	}
@@ -510,7 +499,7 @@ namespace sds
 		// if the timer has elapsed, update back to the initial state.
 		if (stateTracker.IsUp() && stateTracker.LastSentTime.IsElapsed())
 		{
-			return GetResetTranslationResult(singleButton, stateTracker);
+			return std::make_optional<TranslationResult>(GetResetTranslationResult(singleButton, stateTracker));
 		}
 		return {};
 	}
@@ -533,7 +522,7 @@ namespace sds
 			return {};
 		}
 
-		return static_cast<Index_t>(std::distance(mappingsRange.cbegin(), findResult));
+		return std::make_optional<Index_t>(static_cast<Index_t>(std::distance(mappingsRange.cbegin(), findResult)));
 	}
 
 	[[nodiscard]] constexpr auto IsMappingInRange(const NotBoolIntegral_c auto vkToFind, const std::ranges::range auto& downVirtualKeys) noexcept -> bool
@@ -726,7 +715,7 @@ namespace sds
 			{
 				const auto currentDownValue = ActivatedValuesQueue.front();
 				ActivatedValuesQueue.push_front(newDownVk);
-				return std::make_pair(false, currentDownValue);
+				return std::make_pair(false, std::make_optional<Elem_t>(currentDownValue));
 			}
 
 			// New activated mapping case, add to queue in first position and don't filter. No key-up required.
@@ -760,7 +749,7 @@ namespace sds
 						// If there is an overtaken queue, key-down the next key in line.
 						ActivatedValuesQueue.pop_front();
 						// Return the new front hash to be sent a key-down.
-						return !ActivatedValuesQueue.empty() ? ActivatedValuesQueue.front() : std::optional<Elem_t>{};
+						return !ActivatedValuesQueue.empty() ? std::make_optional<Elem_t>(ActivatedValuesQueue.front()) : std::optional<Elem_t>{};
 					}
 				}
 
@@ -818,7 +807,7 @@ namespace sds
 		using VirtualCode_t = int32_t; 
 
 		std::set<VirtualCode_t> m_allVirtualKeycodes; // Order does not match mappings
-		// span to mappings
+		// const ptr to mappings
 		std::shared_ptr<const SmallVector_t<MappingContainer>> m_mappings;
 
 		// map of grouping value to GroupActivationInfo container.

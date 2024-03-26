@@ -11,11 +11,6 @@ endif()
 
 project ("StreamToActionTranslator" LANGUAGES CXX)
 
-
-set(DRIVER_NAME StreamToActionTranslatorApp)  # driver name (change if you wish)
-add_executable (${DRIVER_NAME} "src/driver_main.cpp"  )
-target_compile_features(${DRIVER_NAME} PUBLIC cxx_std_23)
-
 enable_testing()
 add_subdirectory(tests)
 add_subdirectory(src)
