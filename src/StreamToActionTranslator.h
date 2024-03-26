@@ -80,7 +80,7 @@ namespace sds
 	concept InputTranslator_c = requires(Poller_t & t)
 	{
 		{ t.GetUpdatedState({ 1, 2, 3 }) } -> std::convertible_to<TranslationPack>;
-		{ t.GetMappingsRange() } -> std::convertible_to<std::shared_ptr<SmallVector_t<MappingContainer>>>;
+		{ t.GetMappingsRange() } -> std::convertible_to<std::shared_ptr<const SmallVector_t<MappingContainer>>>;
 	};
 
 	template<typename Int_t>
@@ -255,14 +255,15 @@ namespace sds
 	 *		design, it would be possible to, for instance, withhold calling the operation to perform, yet still have the mapping's state updating internally, erroneously.
 	 *		I believe this will make calling order-dependent functionality less error-prone.
 	 */
-	struct TranslationResult
+	struct
+		//alignas(std::hardware_constructive_interference_size)
+	TranslationResult
 	{
-		// TODO test with std::unique_ptr to Fn_t, it currently is like 18k of stack space.
 		// Operation being requested to be performed, callable
 		Fn_t OperationToPerform;
 		// Function to advance the button mapping to the next state (after operation has been performed)
 		Fn_t AdvanceStateFn;
-		// Hash of the mapping it refers to
+		// Vk of the mapping it refers to
 		int32_t MappingVk{};
 		// Exclusivity grouping value, if any
 		std::optional<GrpVal_t> ExclusivityGrouping;
@@ -281,7 +282,9 @@ namespace sds
 	 * \remarks		If using the provided call operator, it will prioritize key-up requests, then key-down requests, then repeat requests, then updates.
 	 *	I figure it should process key-ups and new key-downs with the highest priority, after that keys doing a repeat, and lastly updates.
 	 */
-	struct TranslationPack
+	struct
+		//alignas(std::hardware_constructive_interference_size)
+	TranslationPack
 	{
 		void operator()() const
 		{
@@ -303,6 +306,7 @@ namespace sds
 		SmallVector_t<TranslationResult> UpdateRequests{}; // resets
 		// TODO might wrap the vectors in a struct with a call operator to have individual call operators for range of TranslationResult.
 	};
+	//static_assert(sizeof(TranslationPack) > 0);
 	static_assert(std::copyable<TranslationPack>);
 	static_assert(std::movable<TranslationPack>);
 
@@ -589,9 +593,8 @@ namespace sds
 		using MappingVector_t = SmallVector_t<MappingContainer>;
 		using MappingStateVector_t = SmallVector_t<MappingStateTracker>;
 		static_assert(MappingRange_c<MappingVector_t>);
-
-		std::shared_ptr<MappingVector_t> m_mappings;
 		MappingStateVector_t m_mappingStates;
+		std::shared_ptr<MappingVector_t> m_mappings;
 	public:
 		Translator() = delete; // no default
 		Translator(const Translator& other) = delete; // no copy
@@ -607,7 +610,7 @@ namespace sds
 		 * \exception std::runtime_error on exclusivity group error during construction, OR more than one mapping per VK.
 		 */
 		explicit Translator(MappingRange_c auto&& keyMappings)
-			: m_mappings(std::make_shared<MappingVector_t>(std::move(keyMappings)))
+			: m_mappings(std::make_shared<MappingVector_t>(std::forward<decltype(keyMappings)>(keyMappings)))
 		{
 			if (!AreMappingsUniquePerVk(*m_mappings) || !AreMappingVksNonZero(*m_mappings))
 				throw std::runtime_error("Exception: More than 1 mapping per VK!");
@@ -673,7 +676,7 @@ namespace sds
 			return translations;
 		}
 
-		[[nodiscard]] auto GetMappingsRange() const noexcept -> std::shared_ptr<MappingVector_t>
+		[[nodiscard]] auto GetMappingsRange() const noexcept -> std::shared_ptr<const MappingVector_t>
 		{
 			return m_mappings;
 		}
@@ -806,16 +809,16 @@ namespace sds
 	{
 		using VirtualCode_t = int32_t; 
 
-		std::set<VirtualCode_t> m_allVirtualKeycodes; // Order does not match mappings
+		std::unordered_set<VirtualCode_t> m_allVirtualKeycodes; // Order does not match mappings
 		// const ptr to mappings
 		std::shared_ptr<const SmallVector_t<MappingContainer>> m_mappings;
 
 		// map of grouping value to GroupActivationInfo container.
-		std::map<GrpVal_t, GroupInfo_t> m_groupMap;
+		std::unordered_map<GrpVal_t, GroupInfo_t> m_groupMap;
 		// Mapping of grouping value to mapping indices.
-		std::map<GrpVal_t, std::set<VirtualCode_t>> m_groupToVkMap;
+		std::unordered_map<GrpVal_t, std::set<VirtualCode_t>> m_groupToVkMap;
 		
-		std::map<int32_t, Index_t> m_vkToIndexMap;
+		std::unordered_map<int32_t, Index_t> m_vkToIndexMap;
 	public:
 		OvertakingFilter() noexcept = delete;
 
@@ -900,7 +903,7 @@ namespace sds
 					using std::ranges::find_if;
 					if (m_allVirtualKeycodes.contains(vk))
 					{
-						return m_vkToIndexMap[vk];
+						return std::make_optional<Index_t>(m_vkToIndexMap[vk]);
 					}
 					return {};
 				};
