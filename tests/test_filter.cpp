@@ -80,7 +80,8 @@ int TestFilter()
 
 
 	const auto totalTime = steady_clock::now() - startTime;
-	std::cout << std::vformat("Total time: {}\n", std::make_format_args(duration_cast<microseconds>(totalTime))).c_str();
+	const auto durationTotalTime = duration_cast<microseconds>(totalTime);
+	std::cout << std::vformat("Total time: {}\n", std::make_format_args(durationTotalTime)).c_str();
 	return 0;
 }
 

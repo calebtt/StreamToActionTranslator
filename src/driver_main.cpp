@@ -583,7 +583,9 @@ auto RunTestDriverLoop()
     mapBuffer.append_range(GetDriverMouseMappings());
 
     std::cout << "Test driver program for XBOX 360 controller (or another XINPUT device.)\n";
-    std::cout << std::vformat("Created mappings buffer with {} mappings. Total size: {} bytes.\n", std::make_format_args(mapBuffer.size(), sizeof(mapBuffer.front()) * mapBuffer.size()));
+    const auto mapBufferSize = mapBuffer.size();
+    const auto mappingsSizeInBytes = sizeof(mapBuffer.front()) * mapBuffer.size();
+    std::cout << std::vformat("Created mappings buffer with {} mappings. Total size: {} bytes.\n", std::make_format_args(mapBufferSize, mappingsSizeInBytes));
     std::cout << "Starting poll loop for player 0\n";
     
     // Mappings are then moved into the translator at construction.
