@@ -7,7 +7,7 @@ struct FilterFixture
 {
 	using Vector_t = std::vector<sds::MappingContainer>;
 	using Maps_t = std::shared_ptr<Vector_t>;
-	Maps_t Mappings{ std::make_shared<Vector_t>(std::move(GetTestDriverMappings())) };
+	Maps_t Mappings{ std::make_shared<Vector_t>(GetTestDriverMappings()) };
 
 	auto GetMappingsRange() const -> const Maps_t
 	{
